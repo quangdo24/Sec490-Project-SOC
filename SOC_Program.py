@@ -112,13 +112,13 @@ def normalize_ips(ip_args):
     return list(dict.fromkeys(ips))
 
 
-def prompt_user_mode_and_inputs(default_max_age_days: int):
+def prompt_user_mode_and_inputs():
     """
     Interactive prompt to choose between:
     1) Kibana query mode
     2) Manual AbuseIPDB IP lookup mode
 
-    Returns: (mode, manual_ips, max_age_days)
+    Returns: (mode, manual_ips)
       - mode: "kibana" or "manual"
     """
     print("\nSelect mode:")
@@ -132,24 +132,15 @@ def prompt_user_mode_and_inputs(default_max_age_days: int):
         print("[!] Please enter 1 or 2.")
 
     if choice == "1":
-        return "kibana", [], default_max_age_days
+        return "kibana", []
 
-    ip_text = input("Enter IP(s) (comma-separated): ").strip()
-    manual_ips = normalize_ips([ip_text])
-
-    max_age_text = input(
-        f"Max age in days for AbuseIPDB? (default {default_max_age_days}): "
-    ).strip()
-    if max_age_text:
-        try:
-            max_age_days = int(max_age_text)
-        except ValueError:
-            print("[!] Invalid number, using default.")
-            max_age_days = default_max_age_days
-    else:
-        max_age_days = default_max_age_days
-
-    return "manual", manual_ips, max_age_days
+    # Option 2: force valid IP input so we never accidentally fall through to Kibana mode
+    while True:
+        ip_text = input("Enter IP(s) (comma-separated): ").strip()
+        manual_ips = normalize_ips([ip_text])
+        if manual_ips:
+            return "manual", manual_ips
+        print("[!] No valid IPs entered. Try again (or press Ctrl+C to cancel).")
 
 # Your Exact Postman JSON Body
 query_payload = {
@@ -235,7 +226,7 @@ def check_ip_abuse(ip_address: str, api_key: str, max_age_days: int, verbose: bo
 
 def print_abuseipdb_report(ip_address: str, data: dict):
     print(f"\n--- AbuseIPDB: {ip_address} ---")
-    location_fields = ["countryName", "countryCode", "region", "city"]
+    location_fields = ["countryName", "countryCode", "region"]
     for field in location_fields:
         value = data.get(field)
         if value:
@@ -375,9 +366,9 @@ def main():
     abuse_verbose = args.abuse_verbose
     if not manual_ips and len(sys.argv) == 1 and sys.stdin.isatty():
         try:
-            mode, manual_ips, max_age_days = prompt_user_mode_and_inputs(
-                ABUSEIPDB_MAX_AGE_DAYS
-            )
+            mode, manual_ips = prompt_user_mode_and_inputs()
+            # In interactive mode, don't ask for max age; always use default.
+            max_age_days = ABUSEIPDB_MAX_AGE_DAYS
             if mode == "kibana":
                 manual_ips = []
         except (EOFError, KeyboardInterrupt):

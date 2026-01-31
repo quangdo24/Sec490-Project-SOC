@@ -35,10 +35,12 @@ ABUSEIPDB_KEY_PATH = Path(
     os.getenv("ABUSEIPDB_KEY_PATH", SECRETS_DIR / "abuseipdb.json")
 )
 
+
 DEBUG_PRINT_KIBANA_REQUEST = os.getenv("DEBUG_PRINT_KIBANA_REQUEST", "0") == "1"
 
 
 def load_json_file(path: Path, required_keys: set, example_name: str):
+    """Load a JSON secrets file and validate required keys exist."""
     if not path.exists():
         raise FileNotFoundError(
             f"Missing secrets file: {path}. "
@@ -67,6 +69,7 @@ def print_kibana_request(url: str, headers: dict, payload: dict, username: str):
 
 
 def parse_args():
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description=(
             "Query Suricata alerts from Kibana/Elasticsearch and check IPs via AbuseIPDB, "
@@ -97,6 +100,7 @@ def parse_args():
 
 
 def normalize_ips(ip_args):
+    """Normalize/validate IPs from CLI/prompt input and de-dupe while preserving order."""
     raw = []
     for item in ip_args or []:
         raw.extend([x.strip() for x in str(item).split(",") if x.strip()])
@@ -104,7 +108,11 @@ def normalize_ips(ip_args):
     ips = []
     for ip_str in raw:
         try:
-            ips.append(str(ipaddress.ip_address(ip_str)))
+            ip_obj = ipaddress.ip_address(ip_str)
+            if ip_obj.is_private:
+                print(f"[!] Skipping private IP: {ip_str}")
+                continue
+            ips.append(str(ip_obj))
         except ValueError:
             print(f"[!] Skipping invalid IP: {ip_str}")
 
@@ -167,6 +175,7 @@ query_payload = {
 }
 
 def get_suricata_logs(username: str, password: str):
+    """Query Kibana/Elasticsearch for the latest Suricata alert hits and return the hits list."""
     try:
         headers = {
             "kbn-xsrf": "true",
@@ -199,17 +208,25 @@ def get_suricata_logs(username: str, password: str):
         return []
 
 def extract_ips(logs):
+    """Extract unique source IPs (src_ip) from Kibana hit sources."""
     ips = set()
     for hit in logs:
         source = hit.get("_source", {})
-        for field in ("src_ip", "dest_ip"):
-            ip_value = source.get(field)
-            if ip_value:
-                ips.add(ip_value)
+        ip_value = source.get("src_ip")
+        if not ip_value:
+            continue
+        try:
+            ip_obj = ipaddress.ip_address(ip_value)
+        except ValueError:
+            continue
+        if ip_obj.is_private:
+            continue
+        ips.add(str(ip_obj))
     return sorted(ips)
 
 
 def check_ip_abuse(ip_address: str, api_key: str, max_age_days: int, verbose: bool):
+    """Call AbuseIPDB 'check' API for one IP and return the response 'data' dict."""
     headers = {
         "Key": api_key,
         "Accept": "application/json",
@@ -224,8 +241,12 @@ def check_ip_abuse(ip_address: str, api_key: str, max_age_days: int, verbose: bo
     return response.json().get("data", {})
 
 
-def print_abuseipdb_report(ip_address: str, data: dict):
+def print_abuseipdb_report(ip_address: str, data: dict, match_indices=None):
+    """Print a compact AbuseIPDB report for one IP."""
     print(f"\n--- AbuseIPDB: {ip_address} ---")
+    if match_indices:
+        match_list = ", ".join(str(idx) for idx in sorted(set(match_indices)))
+        print(f"Matches in Kibana query: {match_list}")
     location_fields = ["countryName", "countryCode", "region"]
     for field in location_fields:
         value = data.get(field)
@@ -357,6 +378,7 @@ def print_suricata_hit(idx: int, source: dict):
 
 
 def main():
+    """Program entrypoint: interactive mode selection, Kibana query, and/or AbuseIPDB checks."""
     print(BANNER)
     args = parse_args()
     manual_ips = normalize_ips(args.ip)
@@ -401,9 +423,13 @@ def main():
 
     logs = get_suricata_logs(wa_kibana["username"], wa_kibana["password"])
     if logs:
+        ip_to_matches = {}
         for idx, hit in enumerate(logs, start=1):
             source = hit.get("_source", {})
             print_suricata_hit(idx, source)
+            src_ip = source.get("src_ip")
+            if src_ip:
+                ip_to_matches.setdefault(src_ip, []).append(idx)
 
         ips = extract_ips(logs)
         if ips:
@@ -413,7 +439,9 @@ def main():
                     data = check_ip_abuse(
                         ip_address, abuseipdb["api_key"], max_age_days, abuse_verbose
                     )
-                    print_abuseipdb_report(ip_address, data)
+                    print_abuseipdb_report(
+                        ip_address, data, match_indices=ip_to_matches.get(ip_address)
+                    )
                 except Exception as exc:
                     print(f"[!] AbuseIPDB error for {ip_address}: {exc}")
         else:

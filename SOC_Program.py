@@ -39,6 +39,7 @@ ABUSEIPDB_KEY_PATH = Path(
 DEBUG_PRINT_KIBANA_REQUEST = os.getenv("DEBUG_PRINT_KIBANA_REQUEST", "0") == "1"
 
 
+# Load secrets JSON from disk and validate required keys exist.
 def load_json_file(path: Path, required_keys: set, example_name: str):
     """Load a JSON secrets file and validate required keys exist."""
     if not path.exists():
@@ -53,21 +54,8 @@ def load_json_file(path: Path, required_keys: set, example_name: str):
         raise ValueError(f"Missing keys in {path}: {', '.join(sorted(missing))}")
     return data
 
-
-def print_kibana_request(url: str, headers: dict, payload: dict, username: str):
-    """
-    Pretty-print the Kibana request for debugging without leaking secrets.
-    """
-    print("\n=== Kibana Request (sanitized) ===")
-    print(f"URL: {url}")
-    print(f"Auth: Basic (username={username}, password=<redacted>)")
-    print("Headers:")
-    print(json.dumps(headers, indent=2, sort_keys=True))
-    print("JSON Body:")
-    print(json.dumps(payload, indent=2, sort_keys=True))
-    print("=== End Kibana Request ===\n")
-
-
+    
+# Parse CLI flags like --ip and --abuse-verbose.
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -99,6 +87,7 @@ def parse_args():
     return parser.parse_args()
 
 
+# Normalize and validate IPs from user input; skip invalid/private ranges.
 def normalize_ips(ip_args):
     """Normalize/validate IPs from CLI/prompt input and de-dupe while preserving order."""
     raw = []
@@ -120,15 +109,9 @@ def normalize_ips(ip_args):
     return list(dict.fromkeys(ips))
 
 
+# Interactive menu: choose Kibana mode or manual AbuseIPDB lookup.
 def prompt_user_mode_and_inputs():
-    """
-    Interactive prompt to choose between:
-    1) Kibana query mode
-    2) Manual AbuseIPDB IP lookup mode
-
-    Returns: (mode, manual_ips)
-      - mode: "kibana" or "manual"
-    """
+    """Prompt user to choose Kibana mode or manual AbuseIPDB lookup and collect inputs."""
     print("\nSelect mode:")
     print("  1) Query Kibana / Elasticsearch (then check IPs in AbuseIPDB)")
     print("  2) Manual AbuseIPDB lookup (enter IP address(es))")
@@ -174,6 +157,8 @@ query_payload = {
   "sort": [ { "@timestamp": { "order": "desc" } } ]
 }
 
+
+# Query Kibana/Elasticsearch for recent Suricata alert hits.
 def get_suricata_logs(username: str, password: str):
     """Query Kibana/Elasticsearch for the latest Suricata alert hits and return the hits list."""
     try:
@@ -207,6 +192,8 @@ def get_suricata_logs(username: str, password: str):
         print(f"[!] Error: {e}")
         return []
 
+
+# Extract unique public source IPs (src_ip) from Kibana hits.
 def extract_ips(logs):
     """Extract unique source IPs (src_ip) from Kibana hit sources."""
     ips = set()
@@ -225,6 +212,7 @@ def extract_ips(logs):
     return sorted(ips)
 
 
+# Call AbuseIPDB "check" API for a single IP.
 def check_ip_abuse(ip_address: str, api_key: str, max_age_days: int, verbose: bool):
     """Call AbuseIPDB 'check' API for one IP and return the response 'data' dict."""
     headers = {
@@ -241,6 +229,7 @@ def check_ip_abuse(ip_address: str, api_key: str, max_age_days: int, verbose: bo
     return response.json().get("data", {})
 
 
+# Print a compact AbuseIPDB report, optionally showing which Kibana matches referenced the IP.
 def print_abuseipdb_report(ip_address: str, data: dict, match_indices=None):
     """Print a compact AbuseIPDB report for one IP."""
     print(f"\n--- AbuseIPDB: {ip_address} ---")
@@ -266,11 +255,9 @@ def print_abuseipdb_report(ip_address: str, data: dict, match_indices=None):
         print(f"{field}: {data.get(field)}")
 
 
+# Flatten nested dict/list structures into dotted keys for readable printing.
 def _flatten(obj, prefix=""):
-    """
-    Flatten nested dict/list structures into dotted keys for readable printing.
-    Example: {"a": {"b": 1}} -> {"a.b": 1}
-    """
+    """Flatten nested dict/list structures into dotted keys for readable printing."""
     flat = {}
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -285,22 +272,18 @@ def _flatten(obj, prefix=""):
     return flat
 
 
+# Convert bytes to decimal GB for nicer traffic summaries.
 def _bytes_to_gb(value) -> float | None:
-    """
-    Convert bytes to decimal gigabytes (GB, 1 GB = 1,000,000,000 bytes).
-    Returns None if value is not a number.
-    """
+    """Convert bytes to decimal gigabytes (GB); returns None if the value isn't numeric."""
     try:
         return float(value) / 1_000_000_000
     except (TypeError, ValueError):
         return None
 
 
+# Print a human-friendly summary of one Suricata/Kibana hit plus all flattened fields.
 def print_suricata_hit(idx: int, source: dict):
-    """
-    Nicely print a Suricata/Kibana hit in a readable, non-JSON format.
-    Includes a compact summary plus a full flattened key/value dump.
-    """
+    """Print one Suricata/Kibana hit in a readable, non-JSON format."""
     ts = source.get("@timestamp") or source.get("timestamp")
     src_ip = source.get("src_ip")
     dest_ip = source.get("dest_ip")
@@ -377,6 +360,7 @@ def print_suricata_hit(idx: int, source: dict):
         print(f"- {key} = {value}{suffix}")
 
 
+# Entrypoint: interactive selection, Kibana query, and/or manual AbuseIPDB checks.
 def main():
     """Program entrypoint: interactive mode selection, Kibana query, and/or AbuseIPDB checks."""
     print(BANNER)

@@ -145,12 +145,64 @@ query_payload = {
     "host.architecture", "host.containerized", "host.ip", "flow_id",
     "community_id", "flow.pkts_toserver", "flow.pkts_toclient",
     "flow.bytes_toserver", "flow.bytes_toclient", "dns.query.*",
-    "suricata.eve.alert.*", "alert.*", "log.file.path", "tags", "message"
+    "suricata.eve.alert.*", "alert.*", "log.file.path", "tags", "message",
+    "event_type"
   ],
   "query": {
     "bool": {
-      "should": [
-        { "exists": { "field": "suricata.eve.alert.signature" } }
+      "must": [
+        # event_type: "alert"
+        { "term": { "event_type": "alert" } },
+        # Time range: last 24 hours
+        { "range": { "@timestamp": { "gte": "now-24h", "lte": "now" } } }
+      ],
+      "filter": [
+        {
+          "bool": {
+            "should": [
+              # Try both possible field paths for severity
+              { "range": { "alert.severity": { "lte": 1 } } },
+              { "range": { "suricata.eve.alert.severity": { "lte": 1 } } }
+            ],
+            "minimum_should_match": 1
+          }
+        },
+        {
+          "bool": {
+            "should": [
+              # Try both possible field paths for signature starting with ET
+              { "wildcard": { "alert.signature.keyword": { "value": "ET*", "case_insensitive": True } } },
+              { "wildcard": { "suricata.eve.alert.signature.keyword": { "value": "ET*", "case_insensitive": True } } },
+              { "prefix": { "alert.signature": "ET" } },
+              { "prefix": { "suricata.eve.alert.signature": "ET" } }
+            ],
+            "minimum_should_match": 1
+          }
+        },
+        {
+          "bool": {
+            "should": [
+              # Check for malware keywords in both possible signature field paths
+              { "wildcard": { "alert.signature.keyword": { "value": "*MALWARE*", "case_insensitive": True } } },
+              { "wildcard": { "suricata.eve.alert.signature.keyword": { "value": "*MALWARE*", "case_insensitive": True } } },
+              { "wildcard": { "alert.signature.keyword": { "value": "*TROJAN*", "case_insensitive": True } } },
+              { "wildcard": { "suricata.eve.alert.signature.keyword": { "value": "*TROJAN*", "case_insensitive": True } } },
+              { "wildcard": { "alert.signature.keyword": { "value": "*C2*", "case_insensitive": True } } },
+              { "wildcard": { "suricata.eve.alert.signature.keyword": { "value": "*C2*", "case_insensitive": True } } },
+              { "wildcard": { "alert.signature.keyword": { "value": "*BOTNET*", "case_insensitive": True } } },
+              { "wildcard": { "suricata.eve.alert.signature.keyword": { "value": "*BOTNET*", "case_insensitive": True } } },
+              { "wildcard": { "alert.signature.keyword": { "value": "*EXPLOIT*", "case_insensitive": True } } },
+              { "wildcard": { "suricata.eve.alert.signature.keyword": { "value": "*EXPLOIT*", "case_insensitive": True } } },
+              # Also try without .keyword suffix
+              { "match_phrase": { "alert.signature": "*MALWARE*" } },
+              { "match_phrase": { "alert.signature": "*TROJAN*" } },
+              { "match_phrase": { "alert.signature": "*C2*" } },
+              { "match_phrase": { "alert.signature": "*BOTNET*" } },
+              { "match_phrase": { "alert.signature": "*EXPLOIT*" } }
+            ],
+            "minimum_should_match": 1
+          }
+        }
       ]
     }
   },

@@ -18,4 +18,4 @@ This folder contains **local-only** secrets (ignored by git) and **safe template
 
 Git protection is handled by the repo `.gitignore` which ignores `secrets/*.json` but allows `secrets/*.example.json`.
 
-3. Run this in terminal to install required packages: pip install -r requirements.txt 
+3. Run this in terminal to install required packages: `pip install -r requirements.txt`

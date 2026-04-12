@@ -1360,11 +1360,7 @@ def display_draft_ticket(ticket):
     for line in ticket["description"].split("\n"):
         print(f"  {line}")
 
-<<<<<<< HEAD
-    # ── Steps to Reproduce (Kibana link) ──
-=======
     # ── Steps to Reproduce (e.g. Discover permalink) ──
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
     print(f"\n{C.MAGENTA}{'─' * 70}{C.RESET}")
     print(f"  {C.BOLD}{C.BLUE}Steps to Reproduce{C.RESET}")
     print(f"  {ticket['steps_to_reproduce']}")
@@ -1460,11 +1456,7 @@ def submit_mantis_ticket(ticket, api_url, api_token):
 # ── Gemini + Mantis Combined Flow ────────────────────────────────────────────
 
 def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
-<<<<<<< HEAD
-    """After Kibana results, offer Gemini AI analysis and Mantis ticket submission."""
-=======
     """After OpenSearch results, offer Gemini AI analysis and Mantis ticket submission."""
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
     while True:
         print(f"\n{C.BOLD}{C.WHITE}Would you like to analyze a match with Gemini AI?{C.RESET} ", end="")
         choice = input(f"{C.DIM}(y/n): {C.RESET}").strip().lower()
@@ -1533,16 +1525,9 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
         suggested_project = match_hostname_to_project(hit_hostname)
         project = prompt_select_project(suggested=suggested_project)
 
-<<<<<<< HEAD
-        # Get Kibana permalink
-        kibana_link = input(
-            f"\n{C.BOLD}Enter Kibana permalink{C.RESET} "
-            f"{C.DIM}(https://wa-kibana.cyberrangepoulsbo.com/goto/...): {C.RESET}"
-=======
         discover_link = input(
             f"\n{C.BOLD}Enter OpenSearch Discover permalink (steps to reproduce){C.RESET} "
             f"{C.DIM}(paste from Dashboards → Share, or any relevant URL): {C.RESET}"
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
         ).strip()
 
         # Ticket visibility
@@ -1555,11 +1540,7 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
         ticket = {
             "summary": analysis.get("summary", "Incident Report"),
             "description": format_description_text(analysis),
-<<<<<<< HEAD
-            "steps_to_reproduce": kibana_link,
-=======
             "steps_to_reproduce": discover_link,
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
             "additional_information": analysis.get("additional_information", ""),
             "project_id": project["id"],
             "project_name": project["name"],
@@ -1584,11 +1565,7 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
             print(f"{C.RED}[!] Mantis API error: {exc}{C.RESET}")
 
 
-<<<<<<< HEAD
-# Entrypoint: interactive selection, Kibana query, and/or manual AbuseIPDB checks.
-=======
 # Entrypoint: interactive selection, OpenSearch query, and/or manual AbuseIPDB checks.
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 def main():
     """Program entrypoint: interactive mode selection, OpenSearch query, and/or AbuseIPDB checks."""
     print(BANNER)

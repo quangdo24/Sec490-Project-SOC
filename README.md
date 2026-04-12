@@ -1,30 +1,16 @@
-<<<<<<< HEAD
-# Kibana + AbuseIPDB SOC Tool
-
-A command-line SOC (Security Operations Center) tool that queries **Suricata alerts from Kibana/Elasticsearch** and enriches source IPs with **AbuseIPDB** threat intelligence — all from your terminal.
-=======
 # OpenSearch + AbuseIPDB SOC Tool
 
 A command-line SOC (Security Operations Center) tool that queries **Suricata alerts from OpenSearch** and enriches source IPs with **AbuseIPDB** threat intelligence — all from your terminal.
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 
 ---
 
 ## What It Does
 
-<<<<<<< HEAD
-1. **Query Kibana/Elasticsearch** for recent Suricata IDS alerts (using Lucene syntax)
-2. **Display color-coded alert details** — signature, severity, network flow, GeoIP, traffic stats, DNS, and a direct Kibana link
-3. **Extract public source IPs** from the alerts
-4. **Check each IP against AbuseIPDB** and display a threat report (abuse score, ISP, location, report count)
-5. **Manual IP lookup mode** — skip Kibana and check any IP(s) directly in AbuseIPDB
-=======
 1. **Query OpenSearch** for recent Suricata IDS alerts (using Lucene syntax)
 2. **Display color-coded alert details** — signature, severity, network flow, GeoIP, traffic stats, DNS, and an optional OpenSearch Dashboards link
 3. **Extract public source IPs** from the alerts
 4. **Check each IP against AbuseIPDB** and display a threat report (abuse score, ISP, location, report count)
 5. **Manual IP lookup mode** — skip OpenSearch and check any IP(s) directly in AbuseIPDB
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 
 ---
 
@@ -36,15 +22,9 @@ SOC_Program_SEC490/
 ├── README.md                       # This file
 └── secrets/
     ├── README.md                   # Setup instructions for secrets
-<<<<<<< HEAD
-    ├── wa_kibana.example.json      # Template for Kibana credentials
-    ├── abuseipdb.example.json      # Template for AbuseIPDB API key
-    ├── wa_kibana.json              # Your Kibana credentials (git-ignored)
-=======
     ├── wa_opensearch.example.json  # Template for OpenSearch credentials
     ├── abuseipdb.example.json      # Template for AbuseIPDB API key
     ├── wa_opensearch.json          # Your OpenSearch credentials (git-ignored)
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
     └── abuseipdb.json              # Your AbuseIPDB API key (git-ignored)
 ```
 
@@ -116,17 +96,10 @@ python3 SOC_Program.py
 ```
 
 You'll see a menu:
-<<<<<<< HEAD
-- **Option 1** — Query Kibana for Suricata alerts, then check extracted IPs in AbuseIPDB
-- **Option 2** — Manually enter IP address(es) to check in AbuseIPDB
-
-When using Option 1 (Kibana mode), the tool will prompt you to:
-=======
 - **Option 1** — Query OpenSearch for Suricata alerts, then check extracted IPs in AbuseIPDB
 - **Option 2** — Manually enter IP address(es) to check in AbuseIPDB
 
 When using Option 1 (OpenSearch mode), the tool will prompt you to:
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 - Select a **time range** (15m, 1h, 6h, 24h, 48h, 7d, 30d, or custom)
 - Enter a **custom Lucene query** (or use the default)
 - Choose **how many results** to return
@@ -134,11 +107,7 @@ When using Option 1 (OpenSearch mode), the tool will prompt you to:
 ### CLI Mode
 
 ```bash
-<<<<<<< HEAD
-# Check specific IPs directly (skips Kibana)
-=======
 # Check specific IPs directly (skips OpenSearch)
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 python3 SOC_Program.py --ip 8.8.8.8
 python3 SOC_Program.py --ip 1.2.3.4 --ip 5.6.7.8
 python3 SOC_Program.py --ip "1.2.3.4,5.6.7.8,9.10.11.12"
@@ -192,17 +161,10 @@ python3 SOC_Program.py --ip 8.8.8.8 --abuse-verbose
 ```
 User runs SOC_Program.py
         │
-<<<<<<< HEAD
-        ├── Mode 1: Kibana Query
-        │     │
-        │     ├── Builds Elasticsearch query (Lucene + time range)
-        │     ├── Sends POST to Kibana API (Basic Auth)
-=======
         ├── Mode 1: OpenSearch query
         │     │
         │     ├── Builds search query (Lucene + time range)
         │     ├── Sends POST to Dashboards `/api/console/proxy` (default), or direct `_search` if `OPENSEARCH_TRANSPORT=cluster`
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
         │     ├── Displays color-coded Suricata alert hits
         │     ├── Extracts unique public source IPs
         │     └── Checks each IP against AbuseIPDB API
@@ -219,11 +181,7 @@ User runs SOC_Program.py
 ## Technologies Used
 
 - **Python 3** — main language
-<<<<<<< HEAD
-- **Kibana / Elasticsearch** — Suricata alert data source
-=======
 - **OpenSearch** — Suricata alert data source
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 - **Suricata IDS** — intrusion detection system generating the alerts
 - **AbuseIPDB API** — IP threat intelligence enrichment
 - **Lucene Query Syntax** — flexible alert filtering

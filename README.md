@@ -63,20 +63,6 @@ pip install requests urllib3
 Copy the example templates and fill in your real credentials:
 
 ```bash
-<<<<<<< HEAD
-cp secrets/wa_kibana.example.json secrets/wa_kibana.json
-cp secrets/abuseipdb.example.json secrets/abuseipdb.json
-```
-
-Edit `secrets/wa_kibana.json`:
-```json
-{
-  "username": "YOUR_KIBANA_USERNAME",
-  "password": "YOUR_KIBANA_PASSWORD"
-}
-```
-
-=======
 cp secrets/wa_opensearch.example.json secrets/wa_opensearch.json
 cp secrets/abuseipdb.example.json secrets/abuseipdb.json
 ```
@@ -104,7 +90,6 @@ Queries use Lucene `query_string` like Dev Tools, except a **whole line** that i
 
 Optional: set `OPENSEARCH_DISCOVER_INDEX_PATTERN_ID` so each alert prints a clickable Discover URL (with `dev_tools` transport, the link host defaults to `OPENSEARCH_BASE_URL`). Override the link host with `OPENSEARCH_DASHBOARDS_BASE_URL` if it differs.
 
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 Edit `secrets/abuseipdb.json`:
 ```json
 {
@@ -191,22 +176,14 @@ python3 SOC_Program.py --ip 8.8.8.8 --abuse-verbose
 - GeoIP location (if available)
 - Traffic stats (packets and bytes in each direction)
 - Host info and DNS queries (if available)
-<<<<<<< HEAD
-- Direct clickable Kibana link to the document
-=======
 - Document reference (index + id), or a clickable Discover link if Dashboards env vars are set
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 
 ### AbuseIPDB Report Includes:
 - Abuse confidence score with visual bar (color-coded: red = critical, yellow = high, blue = moderate, green = low)
 - Risk label (CRITICAL / HIGH / MODERATE / LOW)
 - Country, ISP, domain, and usage type
 - Total reports and last reported date
-<<<<<<< HEAD
-- Which Kibana alert(s) triggered the lookup
-=======
 - Which Suricata match(es) triggered the lookup
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 
 ---
 
@@ -260,13 +237,7 @@ User runs SOC_Program.py
 |---------|----------|
 | `Missing secrets file` | Copy the example templates (see Setup step 2) |
 | `NameResolutionError` for AbuseIPDB | Check your internet connection / DNS |
-<<<<<<< HEAD
-| `401 Unauthorized` from Kibana | Verify username/password in `secrets/wa_kibana.json` |
-| `403` from AbuseIPDB | Verify your API key in `secrets/abuseipdb.json` |
-| No alerts returned | Try a wider time range or broader query |
-=======
 | `401 Unauthorized` from OpenSearch | Verify username/password in `secrets/wa_opensearch.json` (or legacy `wa_kibana.json`) |
 | `403` from AbuseIPDB | Verify your API key in `secrets/abuseipdb.json` |
 | No alerts returned | Try a wider time range or broader query |
 | `404` from OpenSearch | With **`dev_tools`** (default), check `OPENSEARCH_INDEX_PATTERN` and credentials. With **`cluster`**, check path prefix / wildcard encoding / GET vs POST (see env vars above) |
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)

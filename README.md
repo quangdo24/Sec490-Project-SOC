@@ -167,11 +167,7 @@ python3 SOC_Program.py --ip 8.8.8.8 --abuse-verbose
 
 ---
 
-<<<<<<< HEAD
-## Example Lucene Queries (Kibana Mode)
-=======
 ## Example Lucene Queries (OpenSearch mode)
->>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 
 | Query | Description |
 |-------|-------------|

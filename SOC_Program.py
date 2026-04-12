@@ -16,7 +16,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 import urllib3
 
-# Suppress SSL warnings if your ELK uses self-signed certs
+# Suppress SSL warnings for self-signed certs
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
@@ -76,13 +76,13 @@ def abuse_score_color(score) -> str:
 
 BANNER = (
     f"\n{C.BOLD}{C.CYAN}"
-    r"  _  ___ _                                    _    ____  _   _ ____  _____ ___ ____  ____  ____   " "\n"
-    r" | |/ (_) |__   __ _ _ __   __ _     _       / \  | __ )| | | / ___|| ____|_ _|  _ \|  _ \| __ )  " "\n"
-    r" | ' /| | '_ \ / _` | '_ \ / _` |  _| |_    / _ \ |  _ \| | | \___ \|  _|  | || |_) | | | |  _ \  " "\n"
-    r" | . \| | |_) | (_| | | | | (_| | |_   _|  / ___ \| |_) | |_| |___) | |___ | ||  __/| |_| | |_) | " "\n"
-    r" |_|\_\_|_.__/ \__,_|_| |_|\__,_|   |_|   /_/   \_\____/ \___/|____/|_____|___|_|   |____/|____/  " "\n"
+    r"  ____   ___   ____   ____             _   _            _  " "\n"
+    r" / ___| / _ \ / ___| / ___|  ___ _ __ | |_(_)_ __   ___| | " "\n"
+    r" \___ \| | | | |     \___ \ / _ \ '_ \| __| | '_ \ / _ \ | " "\n"
+    r"  ___) | |_| | |___   ___) |  __/ | | | |_| | | | |  __/ | " "\n"
+    r" |____/ \___/ \____| |____/ \___|_| |_|\__|_|_| |_|\___|_| " "\n"
     f"{C.RESET}"
-    f"{C.DIM}  Suricata Alert Query + AbuseIPDB Enrichment Tool{C.RESET}\n"
+    f"{C.DIM}  OpenSearch Alert Query + AbuseIPDB Enrichment Tool{C.RESET}\n"
 )
 
 # --- Configuration ---
@@ -178,17 +178,11 @@ SECRETS_DIR = Path(__file__).resolve().parent / "secrets"
 
 
 def resolve_opensearch_cred_path() -> Path:
-    """Prefer explicit env, then wa_opensearch.json, then legacy wa_kibana.json."""
-    explicit = os.getenv("WA_OPENSEARCH_CRED_PATH") or os.getenv("WA_KIBANA_CRED_PATH")
+    """Resolve the OpenSearch credential file path."""
+    explicit = os.getenv("WA_OPENSEARCH_CRED_PATH")
     if explicit:
         return Path(explicit)
-    preferred = SECRETS_DIR / "wa_opensearch.json"
-    legacy = SECRETS_DIR / "wa_kibana.json"
-    if preferred.exists():
-        return preferred
-    if legacy.exists():
-        return legacy
-    return preferred
+    return SECRETS_DIR / "wa_opensearch.json"
 
 
 WA_OPENSEARCH_CRED_PATH = resolve_opensearch_cred_path()
@@ -226,7 +220,6 @@ MANTIS_PROJECTS = [
     {"id": 23, "name": "franklin"},
     {"id": 58, "name": "hawaii"},
     {"id": 32, "name": "health-first"},
-    {"id": 50, "name": "KIBANA Issues"},
     {"id": 15, "name": "kittitas"},
     {"id": 19, "name": "liberty-lake"},
     {"id": 55, "name": "miles-city"},
@@ -251,7 +244,6 @@ MANTIS_PROJECTS = [
 
 DEBUG_PRINT_OPENSEARCH_REQUEST = (
     os.getenv("DEBUG_PRINT_OPENSEARCH_REQUEST", "0") == "1"
-    or os.getenv("DEBUG_PRINT_KIBANA_REQUEST", "0") == "1"
 )
 
 
@@ -298,19 +290,7 @@ def load_json_file(path: Path, required_keys: set, example_name: str):
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description=(
-            "Query Suricata alerts from OpenSearch and check IPs via AbuseIPDB, "
-            "or manually check IPs in AbuseIPDB."
-        )
-    )
-    parser.add_argument(
-        "--ip",
-        action="append",
-        default=[],
-        help=(
-            "Manually check an IP in AbuseIPDB (skips OpenSearch query). "
-            "Can be repeated, or pass comma-separated values."
-        ),
+        description="Query Suricata alerts from OpenSearch and enrich IPs via AbuseIPDB."
     )
     parser.add_argument(
         "--max-age-days",
@@ -326,53 +306,6 @@ def parse_args():
     return parser.parse_args()
 
 
-# Normalize and validate IPs from user input; skip invalid/private ranges.
-def normalize_ips(ip_args):
-    """Normalize/validate IPs from CLI/prompt input and de-dupe while preserving order."""
-    raw = []
-    for item in ip_args or []:
-        raw.extend([x.strip() for x in str(item).split(",") if x.strip()])
-
-    ips = []
-    for ip_str in raw:
-        try:
-            ip_obj = ipaddress.ip_address(ip_str)
-            if ip_obj.is_private:
-                print(f"{C.YELLOW}[!] Skipping private IP: {ip_str}{C.RESET}")
-                continue
-            ips.append(str(ip_obj))
-        except ValueError:
-            print(f"{C.YELLOW}[!] Skipping invalid IP: {ip_str}{C.RESET}")
-
-    # de-dupe while preserving order
-    return list(dict.fromkeys(ips))
-
-
-# Interactive menu: choose OpenSearch mode or manual AbuseIPDB lookup.
-def prompt_user_mode_and_inputs():
-    """Prompt user to choose OpenSearch query mode or manual AbuseIPDB lookup and collect inputs."""
-    print(f"\n{C.BOLD}{C.WHITE}Select mode:{C.RESET}")
-    print(f"  {C.CYAN}1){C.RESET} Query OpenSearch (then check IPs in AbuseIPDB)")
-    print(f"  {C.CYAN}2){C.RESET} Manual AbuseIPDB lookup (enter IP address(es))")
-
-    while True:
-        choice = input(f"{C.BOLD}Enter 1 or 2: {C.RESET}").strip()
-        if choice in {"1", "2"}:
-            break
-        print(f"{C.YELLOW}[!] Please enter 1 or 2.{C.RESET}")
-
-    if choice == "1":
-        return "opensearch", []
-
-    # Option 2: force valid IP input so we never accidentally fall through to OpenSearch mode
-    while True:
-        ip_text = input(f"{C.BOLD}Enter IP(s) (comma-separated): {C.RESET}").strip()
-        manual_ips = normalize_ips([ip_text])
-        if manual_ips:
-            return "manual", manual_ips
-        print(f"{C.YELLOW}[!] No valid IPs entered. Try again (or press Ctrl+C to cancel).{C.RESET}")
-
-
 # Prompt user for custom query and result count when querying OpenSearch.
 def prompt_opensearch_options():
     """Prompt the user for a custom Lucene query, timeframe, and how many results to return."""
@@ -381,26 +314,24 @@ def prompt_opensearch_options():
     print(f"  {C.DIM}Default query:{C.RESET} {C.YELLOW}{DEFAULT_QUERY}{C.RESET}")
     print(f"  {C.DIM}Default time range:{C.RESET} {DEFAULT_TIME_RANGE} to now")
 
-    print(f"\n  {C.BOLD}{C.WHITE}Example queries (Lucene syntax):{C.RESET}")
+    print(f"\n  {C.BOLD}{C.WHITE}Example queries (Lucene syntax for OpenSearch):{C.RESET}")
     print(f"  {C.DIM}─────────────────────────────────────────────────────────────{C.RESET}")
     print(f"  {C.YELLOW}event.kind:\"alert\"{C.RESET}")
-    print(f"    {C.DIM}ECS / Malcolm (same idea as the Discover bar){C.RESET}")
-    print(f"  {C.YELLOW}event_type:\"alert\"{C.RESET}")
-    print(f"    {C.DIM}Legacy Suricata-style field{C.RESET}")
-    print(f"  {C.YELLOW}event_type:\"alert\" AND alert.severity:[0 TO 1]{C.RESET}")
-    print(f"    {C.DIM}High severity alerts only (severity 0 or 1){C.RESET}")
-    print(f"  {C.YELLOW}event_type:\"alert\" AND alert.signature:ET*{C.RESET}")
-    print(f"    {C.DIM}Emerging Threats alerts{C.RESET}")
-    print(f"  {C.YELLOW}event_type:\"alert\" AND alert.signature:(*MALWARE* OR *TROJAN*){C.RESET}")
+    print(f"    {C.DIM}All alerts (ECS field — works with Malcolm / Arkime){C.RESET}")
+    print(f"  {C.YELLOW}event.kind:\"alert\" AND suricata.eve.alert.severity:[1 TO 2]{C.RESET}")
+    print(f"    {C.DIM}High / critical severity alerts only{C.RESET}")
+    print(f"  {C.YELLOW}rule.name:ET* AND event.kind:\"alert\"{C.RESET}")
+    print(f"    {C.DIM}Emerging Threats rule matches{C.RESET}")
+    print(f"  {C.YELLOW}rule.name:(*MALWARE* OR *TROJAN*) AND event.kind:\"alert\"{C.RESET}")
     print(f"    {C.DIM}Malware / Trojan related alerts{C.RESET}")
-    print(f"  {C.YELLOW}src_ip:\"192.168.1.100\" AND event_type:\"alert\"{C.RESET}")
+    print(f"  {C.YELLOW}source.ip:\"192.168.1.100\" AND event.kind:\"alert\"{C.RESET}")
     print(f"    {C.DIM}Alerts from a specific source IP{C.RESET}")
-    print(f"  {C.YELLOW}dest_ip:\"10.0.0.5\" AND alert.severity:1{C.RESET}")
-    print(f"    {C.DIM}Severity 1 alerts targeting a specific dest IP{C.RESET}")
-    print(f"  {C.YELLOW}event_type:\"alert\" AND alert.signature:(*C2* OR *BOTNET* OR *EXPLOIT*){C.RESET}")
+    print(f"  {C.YELLOW}destination.ip:\"10.0.0.5\" AND suricata.eve.alert.severity:1{C.RESET}")
+    print(f"    {C.DIM}Severity 1 alerts targeting a specific destination{C.RESET}")
+    print(f"  {C.YELLOW}rule.name:(*C2* OR *BOTNET* OR *EXPLOIT*){C.RESET}")
     print(f"    {C.DIM}C2, botnet, or exploit activity{C.RESET}")
-    print(f"  {C.YELLOW}event_type:\"dns\" AND dns.query.rrname:*.ru{C.RESET}")
-    print(f"    {C.DIM}DNS queries to .ru domains{C.RESET}")
+    print(f"  {C.YELLOW}network.application:\"dns\" AND destination.ip:*{C.RESET}")
+    print(f"    {C.DIM}DNS traffic to external destinations{C.RESET}")
     print(f"  {C.DIM}─────────────────────────────────────────────────────────────{C.RESET}")
 
     # Timeframe selection (standard presets + custom)
@@ -749,23 +680,6 @@ def print_abuseipdb_report(ip_address: str, data: dict, match_context=None):
         print(f"  {C.BOLD}{C.WHITE}Last Seen{C.RESET}    {last_reported}")
 
     print(f"{C.MAGENTA}{'─' * 70}{C.RESET}")
-
-
-# Flatten nested dict/list structures into dotted keys for readable printing.
-def _flatten(obj, prefix=""):
-    """Flatten nested dict/list structures into dotted keys for readable printing."""
-    flat = {}
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            key = f"{prefix}.{k}" if prefix else str(k)
-            flat.update(_flatten(v, key))
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            key = f"{prefix}[{i}]"
-            flat.update(_flatten(v, key))
-    else:
-        flat[prefix] = obj
-    return flat
 
 
 # Convert bytes to a human-friendly string (B, KB, MB, GB).
@@ -1565,49 +1479,25 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
             print(f"{C.RED}[!] Mantis API error: {exc}{C.RESET}")
 
 
-# Entrypoint: interactive selection, OpenSearch query, and/or manual AbuseIPDB checks.
 def main():
-    """Program entrypoint: interactive mode selection, OpenSearch query, and/or AbuseIPDB checks."""
+    """Program entrypoint: query OpenSearch for Suricata alerts, then enrich IPs via AbuseIPDB."""
     print(BANNER)
     args = parse_args()
-    manual_ips = normalize_ips(args.ip)
 
-    # If user provided no CLI flags, prompt interactively (when possible)
     max_age_days = args.max_age_days
     abuse_verbose = args.abuse_verbose
     custom_query = DEFAULT_QUERY
     result_count = DEFAULT_RESULT_COUNT
     time_gte = DEFAULT_TIME_RANGE
 
-    if not manual_ips and len(sys.argv) == 1 and sys.stdin.isatty():
+    if sys.stdin.isatty():
         try:
-            mode, manual_ips = prompt_user_mode_and_inputs()
-            # In interactive mode, don't ask for max age; always use default.
-            max_age_days = ABUSEIPDB_MAX_AGE_DAYS
-            if mode == "opensearch":
-                manual_ips = []
-                custom_query, result_count, time_gte = prompt_opensearch_options()
+            custom_query, result_count, time_gte = prompt_opensearch_options()
         except (EOFError, KeyboardInterrupt):
             print(f"\n{C.YELLOW}[*] Cancelled.{C.RESET}")
             return
 
-    # Manual AbuseIPDB mode (skips OpenSearch query)
-    if manual_ips:
-        abuseipdb = load_json_file(
-            ABUSEIPDB_KEY_PATH, {"api_key"}, "abuseipdb.example.json"
-        )
-        print(f"{C.CYAN}[*] Checking {len(manual_ips)} manual IP(s) against AbuseIPDB...{C.RESET}")
-        for ip_address in manual_ips:
-            try:
-                data = check_ip_abuse(
-                    ip_address, abuseipdb["api_key"], max_age_days, abuse_verbose
-                )
-                print_abuseipdb_report(ip_address, data)
-            except Exception as exc:
-                print(f"{C.RED}[!] AbuseIPDB error for {ip_address}: {exc}{C.RESET}")
-        return
-
-    # Normal mode: OpenSearch query + AbuseIPDB checks for extracted IPs
+    # OpenSearch query + AbuseIPDB checks for extracted IPs
     opensearch_creds = load_json_file(
         WA_OPENSEARCH_CRED_PATH, {"username", "password"}, "wa_opensearch.example.json"
     )

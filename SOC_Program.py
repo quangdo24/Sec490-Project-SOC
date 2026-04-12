@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import argparse
 import urllib.parse
 import time
@@ -9,6 +10,7 @@ import tempfile
 import ipaddress
 import sys
 from pathlib import Path
+from typing import Optional
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -84,18 +86,112 @@ BANNER = (
 )
 
 # --- Configuration ---
-KIBANA_BASE_URL = "https://wa-kibana.cyberrangepoulsbo.com"
-ELASTIC_URL = f"{KIBANA_BASE_URL}/api/console/proxy?path=/suricata-*/_search&method=POST"
+def _rstrip_slash(url: str) -> str:
+    return url.rstrip("/") if url else url
+
+
+# With OPENSEARCH_TRANSPORT=dev_tools this is the OpenSearch Dashboards origin (same as Dev Tools).
+# With transport=cluster this is the OpenSearch REST API base URL.
+OPENSEARCH_BASE_URL = _rstrip_slash(
+    os.getenv("OPENSEARCH_BASE_URL", "https://pisces-opensearch.cyberrangepoulsbo.com")
+)
+OPENSEARCH_INDEX_PATTERN = os.getenv(
+    "OPENSEARCH_INDEX_PATTERN",
+    "arkime_sessions3-*",
+)
+# If the API is mounted under a subpath (e.g. "opensearch" → .../opensearch/<index>/_search).
+OPENSEARCH_PATH_PREFIX = os.getenv("OPENSEARCH_PATH_PREFIX", "").strip().strip("/")
+# Many reverse proxies return 404 for a literal "*" in the path; encoding as %2A fixes that.
+OPENSEARCH_RAW_INDEX_IN_URL = os.getenv("OPENSEARCH_RAW_INDEX_IN_URL", "0") == "1"
+# HTTP verb forwarded to OpenSearch for the _search call (Dev Tools: GET _search { ... }).
+_os_http_method = os.getenv("OPENSEARCH_SEARCH_HTTP_METHOD", "GET").strip().upper()
+OPENSEARCH_SEARCH_HTTP_METHOD = _os_http_method if _os_http_method in ("GET", "POST") else "GET"
+
+# dev_tools = POST to Dashboards /api/console/proxy?path=...&method=... (same as Dev Tools console).
+# cluster = call OpenSearch REST API on OPENSEARCH_BASE_URL (GET/POST per OPENSEARCH_SEARCH_HTTP_METHOD).
+_op_tr = os.getenv("OPENSEARCH_TRANSPORT", "dev_tools").strip().lower()
+if _op_tr in ("cluster", "direct"):
+    OPENSEARCH_TRANSPORT = "cluster"
+else:
+    OPENSEARCH_TRANSPORT = "dev_tools"
+
+# Optional multi-data-source Console param (query string dataSourceId).
+OPENSEARCH_DATA_SOURCE_ID = os.getenv("OPENSEARCH_DATA_SOURCE_ID", "").strip()
+
+
+def _normalize_lucene_query(query: str) -> str:
+    """Normalize Lucene pasted from the UI (curly quotes, spaces after ':')."""
+    query = query.strip()
+    for bad, good in (
+        ("\u201c", '"'),
+        ("\u201d", '"'),
+        ("\u2018", "'"),
+        ("\u2019", "'"),
+    ):
+        query = query.replace(bad, good)
+    # "field: \"value\"" breaks query_string; Lucene expects field:\"value\" or field:value
+    query = re.sub(r":\s+\"", ':"', query)
+    query = re.sub(r":\s+'", ":'", query)
+    return query
+
+
+def _parse_whole_query_event_kind(query: str) -> Optional[str]:
+    """If the line is only event.kind = X, return X for a keyword ``term`` query (GUI-style)."""
+    m = re.match(
+        r"^\s*event\.kind\s*:\s*(?:\"([^\"]+)\"|(\S+))\s*$",
+        query,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+    return (m.group(1) or m.group(2) or "").strip() or None
+
+
+def opensearch_search_url() -> str:
+    """Full URL for the _search request (index pattern segment is URL-encoded by default)."""
+    if OPENSEARCH_RAW_INDEX_IN_URL:
+        segment = OPENSEARCH_INDEX_PATTERN
+    else:
+        segment = urllib.parse.quote(OPENSEARCH_INDEX_PATTERN, safe="")
+    parts = [OPENSEARCH_BASE_URL]
+    if OPENSEARCH_PATH_PREFIX:
+        parts.append(OPENSEARCH_PATH_PREFIX)
+    parts.append(segment)
+    parts.append("_search")
+    return "/".join(parts)
+
+# Optional OpenSearch Dashboards (for clickable Discover document links).
+OPENSEARCH_DASHBOARDS_BASE_URL = _rstrip_slash(
+    os.getenv("OPENSEARCH_DASHBOARDS_BASE_URL", "")
+)
+OPENSEARCH_DISCOVER_INDEX_PATTERN_ID = os.getenv(
+    "OPENSEARCH_DISCOVER_INDEX_PATTERN_ID", ""
+)
+
 ABUSEIPDB_URL = "https://api.abuseipdb.com/api/v2/check"
 ABUSEIPDB_MAX_AGE_DAYS = 90
-DEFAULT_QUERY = 'event_type:"alert" AND alert.signature:ET*'
+DEFAULT_QUERY = 'event.kind:alert'
 DEFAULT_RESULT_COUNT = 10
 DEFAULT_TIME_RANGE = "now-48h"
 
 SECRETS_DIR = Path(__file__).resolve().parent / "secrets"
-WA_KIBANA_CRED_PATH = Path(
-    os.getenv("WA_KIBANA_CRED_PATH", SECRETS_DIR / "wa_kibana.json")
-)
+
+
+def resolve_opensearch_cred_path() -> Path:
+    """Prefer explicit env, then wa_opensearch.json, then legacy wa_kibana.json."""
+    explicit = os.getenv("WA_OPENSEARCH_CRED_PATH") or os.getenv("WA_KIBANA_CRED_PATH")
+    if explicit:
+        return Path(explicit)
+    preferred = SECRETS_DIR / "wa_opensearch.json"
+    legacy = SECRETS_DIR / "wa_kibana.json"
+    if preferred.exists():
+        return preferred
+    if legacy.exists():
+        return legacy
+    return preferred
+
+
+WA_OPENSEARCH_CRED_PATH = resolve_opensearch_cred_path()
 ABUSEIPDB_KEY_PATH = Path(
     os.getenv("ABUSEIPDB_KEY_PATH", SECRETS_DIR / "abuseipdb.json")
 )
@@ -153,7 +249,33 @@ MANTIS_PROJECTS = [
 ]
 
 
-DEBUG_PRINT_KIBANA_REQUEST = os.getenv("DEBUG_PRINT_KIBANA_REQUEST", "0") == "1"
+DEBUG_PRINT_OPENSEARCH_REQUEST = (
+    os.getenv("DEBUG_PRINT_OPENSEARCH_REQUEST", "0") == "1"
+    or os.getenv("DEBUG_PRINT_KIBANA_REQUEST", "0") == "1"
+)
+
+
+def print_opensearch_request(
+    http_method: str,
+    url: str,
+    headers: dict,
+    payload: dict,
+    username: str,
+    query_params: Optional[dict] = None,
+):
+    """Print debug details for the OpenSearch request (password redacted)."""
+    body_preview = json.dumps(payload, indent=2, default=str)
+    if len(body_preview) > 12000:
+        body_preview = body_preview[:12000] + "\n  ... (truncated)"
+    print(f"{C.DIM}--- DEBUG OpenSearch request ---{C.RESET}")
+    print(f"  HTTP: {http_method}")
+    print(f"  URL: {url}")
+    if query_params:
+        print(f"  Query: {query_params}")
+    print(f"  Auth: HTTP Basic ({username!r} / ***)")
+    print(f"  Headers: {headers}")
+    print(f"  Body:\n{body_preview}")
+    print(f"{C.DIM}--- end debug ---{C.RESET}")
 
 
 # Load secrets JSON from disk and validate required keys exist.
@@ -177,7 +299,7 @@ def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description=(
-            "Query Suricata alerts from Kibana/Elasticsearch and check IPs via AbuseIPDB, "
+            "Query Suricata alerts from OpenSearch and check IPs via AbuseIPDB, "
             "or manually check IPs in AbuseIPDB."
         )
     )
@@ -186,7 +308,7 @@ def parse_args():
         action="append",
         default=[],
         help=(
-            "Manually check an IP in AbuseIPDB (skips Kibana query). "
+            "Manually check an IP in AbuseIPDB (skips OpenSearch query). "
             "Can be repeated, or pass comma-separated values."
         ),
     )
@@ -226,11 +348,11 @@ def normalize_ips(ip_args):
     return list(dict.fromkeys(ips))
 
 
-# Interactive menu: choose Kibana mode or manual AbuseIPDB lookup.
+# Interactive menu: choose OpenSearch mode or manual AbuseIPDB lookup.
 def prompt_user_mode_and_inputs():
-    """Prompt user to choose Kibana mode or manual AbuseIPDB lookup and collect inputs."""
+    """Prompt user to choose OpenSearch query mode or manual AbuseIPDB lookup and collect inputs."""
     print(f"\n{C.BOLD}{C.WHITE}Select mode:{C.RESET}")
-    print(f"  {C.CYAN}1){C.RESET} Query Kibana / Elasticsearch (then check IPs in AbuseIPDB)")
+    print(f"  {C.CYAN}1){C.RESET} Query OpenSearch (then check IPs in AbuseIPDB)")
     print(f"  {C.CYAN}2){C.RESET} Manual AbuseIPDB lookup (enter IP address(es))")
 
     while True:
@@ -240,9 +362,9 @@ def prompt_user_mode_and_inputs():
         print(f"{C.YELLOW}[!] Please enter 1 or 2.{C.RESET}")
 
     if choice == "1":
-        return "kibana", []
+        return "opensearch", []
 
-    # Option 2: force valid IP input so we never accidentally fall through to Kibana mode
+    # Option 2: force valid IP input so we never accidentally fall through to OpenSearch mode
     while True:
         ip_text = input(f"{C.BOLD}Enter IP(s) (comma-separated): {C.RESET}").strip()
         manual_ips = normalize_ips([ip_text])
@@ -251,8 +373,8 @@ def prompt_user_mode_and_inputs():
         print(f"{C.YELLOW}[!] No valid IPs entered. Try again (or press Ctrl+C to cancel).{C.RESET}")
 
 
-# Prompt user for custom query and result count when in Kibana mode.
-def prompt_kibana_options():
+# Prompt user for custom query and result count when querying OpenSearch.
+def prompt_opensearch_options():
     """Prompt the user for a custom Lucene query, timeframe, and how many results to return."""
     print(f"\n{C.BOLD}{C.WHITE}Query Configuration{C.RESET}")
     print(f"{C.CYAN}{'─' * 70}{C.RESET}")
@@ -261,8 +383,10 @@ def prompt_kibana_options():
 
     print(f"\n  {C.BOLD}{C.WHITE}Example queries (Lucene syntax):{C.RESET}")
     print(f"  {C.DIM}─────────────────────────────────────────────────────────────{C.RESET}")
+    print(f"  {C.YELLOW}event.kind:\"alert\"{C.RESET}")
+    print(f"    {C.DIM}ECS / Malcolm (same idea as the Discover bar){C.RESET}")
     print(f"  {C.YELLOW}event_type:\"alert\"{C.RESET}")
-    print(f"    {C.DIM}All alerts{C.RESET}")
+    print(f"    {C.DIM}Legacy Suricata-style field{C.RESET}")
     print(f"  {C.YELLOW}event_type:\"alert\" AND alert.severity:[0 TO 1]{C.RESET}")
     print(f"    {C.DIM}High severity alerts only (severity 0 or 1){C.RESET}")
     print(f"  {C.YELLOW}event_type:\"alert\" AND alert.signature:ET*{C.RESET}")
@@ -343,81 +467,194 @@ def prompt_kibana_options():
     return query, count, time_gte
 
 
-# Build the Elasticsearch query payload dynamically.
 def build_query_payload(query: str = DEFAULT_QUERY, size: int = DEFAULT_RESULT_COUNT, time_gte: str = DEFAULT_TIME_RANGE):
-    """Build the Elasticsearch JSON query payload with the given Lucene query and result size."""
-    return {
-      "size": size,
-      "_source": [
-        "@timestamp", "timestamp", "src_ip", "dest_ip", "src_port", "dest_port",
-        "proto", "app_proto", "traffic_type", "in_iface", "geoip.src_country.*",
-        "geoip.dest_country.*", "geoip.src.*", "geoip.dest.*", "frame.length",
-        "frame.direction", "frame.stream_offset", "frame.payload",
-        "frame.payload_printable", "host.hostname", "host.os.*",
-        "host.architecture", "host.containerized", "host.ip", "flow_id",
-        "community_id", "flow.pkts_toserver", "flow.pkts_toclient",
-        "flow.bytes_toserver", "flow.bytes_toclient", "dns.query.*",
-        "suricata.eve.alert.*", "alert.*", "log.file.path", "tags", "message",
-        "event_type"
-      ],
-      "query": {
-        "bool": {
-          "must": [
-            {
-              "query_string": {
-                "query": query
-              }
-            },
-            { "range": { "@timestamp": { "gte": time_gte, "lte": "now" } } }
-          ]
+    """Build the ``_search`` JSON body.
+
+    Tested against ``arkime_sessions3-*`` on pisces-opensearch.  The exact shape below
+    returns 10 000+ hits for ``event.kind:alert`` with ``@timestamp`` sort + range.
+    """
+    query = _normalize_lucene_query(query)
+
+    kind_val = _parse_whole_query_event_kind(query)
+    if kind_val is not None:
+        must_clause: dict = {"term": {"event.kind": kind_val}}
+    else:
+        must_clause = {
+            "query_string": {
+                "query": query,
+                "lenient": True,
+                "analyze_wildcard": True,
+            }
         }
-      },
-      "sort": [ { "@timestamp": { "order": "desc" } } ]
+
+    return {
+        "size": size,
+        "track_total_hits": True,
+        "_source": True,
+        "query": {
+            "bool": {
+                "must": [must_clause],
+                "filter": [
+                    {"range": {"@timestamp": {"gte": time_gte, "lte": "now"}}},
+                ],
+            }
+        },
+        "sort": [{"@timestamp": {"order": "desc", "unmapped_type": "date"}}],
     }
 
 
-# Query Kibana/Elasticsearch for recent Suricata alert hits.
-def get_suricata_logs(username: str, password: str, payload: dict):
-    """Query Kibana/Elasticsearch for the latest Suricata alert hits and return the hits list."""
+def _search_total_hits(data: dict):
+    """Normalize hits.total (int or OpenSearch 7+ {value, relation}) to an int for display."""
+    total = (data.get("hits") or {}).get("total")
+    if isinstance(total, dict):
+        try:
+            return int(total.get("value", 0))
+        except (TypeError, ValueError):
+            return 0
     try:
-        headers = {
-            "kbn-xsrf": "true",
-            "Content-Type": "application/json",
-        }
+        return int(total) if total is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
-        print(f"{C.CYAN}[*] Querying Kibana / Elasticsearch for latest Suricata alerts...{C.RESET}")
-        if DEBUG_PRINT_KIBANA_REQUEST:
-            print_kibana_request(ELASTIC_URL, headers, payload, username)
 
-        # Mimicking Postman POST request with Basic Auth
-        response = requests.post(
-            ELASTIC_URL,
-            json=payload,
-            auth=HTTPBasicAuth(username, password),
-            headers=headers,
-            verify=False # Equivalent to turning off SSL verification in Postman
-        )
+# Query OpenSearch for recent Suricata alert hits.
+def get_suricata_logs(username: str, password: str, payload: dict):
+    """Query OpenSearch _search for the latest Suricata alert hits and return the hits list."""
+    try:
+        print(f"{C.CYAN}[*] Querying OpenSearch for latest Suricata alerts...{C.RESET}")
+        if os.getenv("OPENSEARCH_ECHO_SEARCH_BODY", "0").strip() == "1":
+            compact = json.dumps(payload, separators=(",", ":"), default=str)
+            cap = 2500
+            tail = "…" if len(compact) > cap else ""
+            print(f"{C.DIM}    JSON body (paste into Dev Tools): {compact[:cap]}{tail}{C.RESET}")
+
+        if OPENSEARCH_TRANSPORT == "dev_tools":
+            # Same mechanism as Dev Tools: POST to Dashboards with path + verb in query string.
+            proxy_url = f"{OPENSEARCH_BASE_URL}/api/console/proxy"
+            idx = OPENSEARCH_INDEX_PATTERN.strip().strip("/")
+            proxy_path = f"/{idx}/_search" if idx else "/_search"
+            print(
+                f"{C.DIM}    Transport: Dev Tools proxy  →  "
+                f"path={proxy_path!r}  opensearch_method={OPENSEARCH_SEARCH_HTTP_METHOD}{C.RESET}"
+            )
+            print(
+                f"{C.DIM}    Index pattern env: OPENSEARCH_INDEX_PATTERN={OPENSEARCH_INDEX_PATTERN!r}{C.RESET}"
+            )
+            query_params = {
+                "method": OPENSEARCH_SEARCH_HTTP_METHOD,
+                "path": proxy_path,
+            }
+            if OPENSEARCH_DATA_SOURCE_ID:
+                query_params["dataSourceId"] = OPENSEARCH_DATA_SOURCE_ID
+            headers = {
+                "Content-Type": "application/json",
+                "osd-xsrf": "true",
+            }
+            if DEBUG_PRINT_OPENSEARCH_REQUEST:
+                print_opensearch_request(
+                    "POST",
+                    proxy_url,
+                    headers,
+                    payload,
+                    username,
+                    query_params=query_params,
+                )
+            response = requests.post(
+                proxy_url,
+                params=query_params,
+                data=json.dumps(payload, default=str),
+                auth=HTTPBasicAuth(username, password),
+                headers=headers,
+                verify=False,
+                timeout=120,
+            )
+        else:
+            headers = {"Content-Type": "application/json"}
+            search_url = opensearch_search_url()
+            method = OPENSEARCH_SEARCH_HTTP_METHOD
+            print(
+                f"{C.DIM}    Transport: cluster  →  {method} {search_url}{C.RESET}"
+            )
+            print(
+                f"{C.DIM}    Index pattern env: OPENSEARCH_INDEX_PATTERN={OPENSEARCH_INDEX_PATTERN!r}{C.RESET}"
+            )
+            if DEBUG_PRINT_OPENSEARCH_REQUEST:
+                print_opensearch_request(
+                    method, search_url, headers, payload, username
+                )
+            req_kwargs = {
+                "method": method,
+                "url": search_url,
+                "auth": HTTPBasicAuth(username, password),
+                "headers": headers,
+                "verify": False,
+                "timeout": 120,
+            }
+            if method == "GET":
+                req_kwargs["data"] = json.dumps(payload, default=str)
+            else:
+                req_kwargs["json"] = payload
+            response = requests.request(**req_kwargs)
 
         response.raise_for_status()
-        data = response.json()
-        
+        try:
+            data = response.json()
+        except json.JSONDecodeError:
+            snippet = (response.text or "")[:400].replace("\n", " ")
+            print(
+                f"{C.RED}[!] Response was not JSON (wrong URL or login page?).{C.RESET}\n"
+                f"  {C.DIM}{snippet}{'…' if len(response.text or '') > 400 else ''}{C.RESET}"
+            )
+            return []
+
+        if not isinstance(data, dict):
+            print(f"{C.RED}[!] Unexpected response shape from OpenSearch.{C.RESET}")
+            return []
+
         # Accessing the list of logs (hits)
-        hits = data.get('hits', {}).get('hits', [])
-        print(f"{C.GREEN}[✓] Successfully retrieved {len(hits)} alert(s) from Suricata.{C.RESET}")
+        hits = data.get("hits", {}).get("hits", []) or []
+        total = _search_total_hits(data)
+        print(
+            f"{C.GREEN}[✓] Retrieved {len(hits)} document(s) in this page "
+            f"({total} total matches in index scope).{C.RESET}"
+        )
+        if total == 0 and len(hits) == 0:
+            print(
+                f"{C.YELLOW}[!] Zero hits — the Lucene query is in the JSON body (query_string). "
+                f"If Dev Tools works with a different index name, set e.g.{C.RESET}\n"
+                f"  {C.DIM}export OPENSEARCH_INDEX_PATTERN='your-index-*'{C.RESET}\n"
+                f"  {C.DIM}Run in Dev Tools: GET _cat/indices?v  (to see real index names){C.RESET}"
+            )
         return hits
 
+    except requests.HTTPError as e:
+        resp = e.response
+        url = getattr(resp, "url", "") or "(unknown URL)"
+        print(f"{C.RED}[!] Error: {e}{C.RESET}")
+        if resp is not None and resp.status_code == 404:
+            print(
+                f"{C.YELLOW}[!] 404 usually means wrong path, index pattern, or transport.{C.RESET}\n"
+                f"  {C.DIM}• Default is Dev Tools proxy (OPENSEARCH_TRANSPORT=dev_tools). "
+                f"If your host is raw OpenSearch only, try OPENSEARCH_TRANSPORT=cluster{C.RESET}\n"
+                f"  {C.DIM}• Cluster mode: some gateways block POST to _search — use "
+                f"OPENSEARCH_SEARCH_HTTP_METHOD=GET or POST as needed{C.RESET}\n"
+                f"  {C.DIM}• Try OPENSEARCH_INDEX_PATTERN if indices are not named {OPENSEARCH_INDEX_PATTERN!r}{C.RESET}\n"
+                f"  {C.DIM}• Cluster subpath: OPENSEARCH_PATH_PREFIX; wildcards: OPENSEARCH_RAW_INDEX_IN_URL=1{C.RESET}\n"
+                f"  {C.DIM}• Failed URL: {url}{C.RESET}"
+            )
+        return []
     except Exception as e:
         print(f"{C.RED}[!] Error: {e}{C.RESET}")
         return []
 
 
-# Extract unique public source IPs (src_ip) from Kibana hits.
+# Extract unique public source IPs from search hits (ECS source.ip, fallback src_ip).
 def extract_ips(logs):
-    """Extract unique source IPs (src_ip) from Kibana hit sources."""
+    """Extract unique public source IPs from OpenSearch hit _source fields."""
     ips = set()
     for hit in logs:
         source = hit.get("_source", {})
-        ip_value = source.get("src_ip")
+        ip_value = _deep(source, "source", "ip") or source.get("src_ip")
         if not ip_value:
             continue
         try:
@@ -545,63 +782,131 @@ def _bytes_human(value) -> str:
     return f"{b:.1f} PB"
 
 
-# Build a clickable Kibana Discover URL that filters to a specific document.
-def build_kibana_url(doc_id: str, index: str) -> str:
-    """Build a Kibana Discover URL that links to the specific document."""
-    # Uses Kibana's doc view: /app/discover#/doc/<index-pattern-id>/<index>?id=<doc_id>
-    # The index pattern ID is the Kibana saved-object UUID for the suricata-* data view.
-    index_pattern_id = "1e738c90-2c6a-11f0-bce4-7d11b23f0172"
+def build_opensearch_discover_url(doc_id: str, index: str) -> str:
+    """Build OpenSearch Dashboards Discover URL for one document, or '' if not configured.
+
+    Set OPENSEARCH_DISCOVER_INDEX_PATTERN_ID (saved object id of the data view). If
+    OPENSEARCH_DASHBOARDS_BASE_URL is unset and transport is dev_tools, the same host
+    as OPENSEARCH_BASE_URL is used for links.
+    """
+    base = OPENSEARCH_DASHBOARDS_BASE_URL or (
+        OPENSEARCH_BASE_URL if OPENSEARCH_TRANSPORT == "dev_tools" else ""
+    )
+    pattern_id = OPENSEARCH_DISCOVER_INDEX_PATTERN_ID
+    if not (base and pattern_id and doc_id and index):
+        return ""
     encoded_id = urllib.parse.quote(doc_id, safe="")
     encoded_index = urllib.parse.quote(index, safe="")
-    return f"{KIBANA_BASE_URL}/app/discover#/doc/{index_pattern_id}/{encoded_index}?id={encoded_id}"
+    return f"{base}/app/discover#/doc/{pattern_id}/{encoded_index}?id={encoded_id}"
 
 
-# Print a clean, color-coded summary of one Suricata/Kibana hit.
+def _deep(obj, *keys, default=None):
+    """Walk nested dicts by key path, returning *default* if any step is missing."""
+    for k in keys:
+        if not isinstance(obj, dict):
+            return default
+        obj = obj.get(k)
+        if obj is None:
+            return default
+    return obj
+
+
+def _first(*values):
+    """Return the first non-None value."""
+    for v in values:
+        if v is not None:
+            return v
+    return None
+
+
+# Print a clean, color-coded summary of one Suricata search hit.
 def print_suricata_hit(idx: int, hit: dict):
-    """Print one Suricata/Kibana hit in a clean, color-coded format."""
+    """Print one alert hit (ECS / Malcolm / Arkime layout) in a clean, color-coded format."""
     source = hit.get("_source", {})
     doc_id = hit.get("_id", "")
     doc_index = hit.get("_index", "")
 
     ts = source.get("@timestamp") or source.get("timestamp")
-    src_ip = source.get("src_ip")
-    dest_ip = source.get("dest_ip")
-    src_port = source.get("src_port")
-    dest_port = source.get("dest_port")
-    proto = source.get("proto")
-    app_proto = source.get("app_proto")
 
-    # Suricata alert fields can appear in different places depending on pipeline
-    alert = source.get("alert") or {}
-    suricata_alert = (
-        (((source.get("suricata") or {}).get("eve") or {}).get("alert")) or {}
-    )
-    signature = (
-        suricata_alert.get("signature")
-        or alert.get("signature")
-        or source.get("suricata.eve.alert.signature")
-    )
-    category = suricata_alert.get("category") or alert.get("category")
-    severity = suricata_alert.get("severity") or alert.get("severity")
-    signature_id = suricata_alert.get("signature_id") or alert.get("signature_id")
+    # ECS: source.ip / destination.ip — fallback to legacy src_ip / dest_ip
+    src_ip = _deep(source, "source", "ip") or source.get("src_ip")
+    dest_ip = _deep(source, "destination", "ip") or source.get("dest_ip")
+    src_port = _deep(source, "source", "port") or source.get("src_port")
+    dest_port = _deep(source, "destination", "port") or source.get("dest_port")
 
-    # GeoIP (best effort)
-    geoip = source.get("geoip") or {}
+    # Protocol / transport
+    net = source.get("network") or {}
+    proto = net.get("transport") or source.get("proto")
+    app_proto = net.get("application") or source.get("app_proto")
+
+    # Rule / signature (ECS rule.name, fallback to suricata.alert, then legacy alert)
+    rule = source.get("rule") or {}
+    suricata = source.get("suricata") or {}
+    suricata_alert = suricata.get("alert") or {}
+    legacy_alert = source.get("alert") or {}
+    suricata_eve_alert = _deep(source, "suricata", "eve", "alert") or {}
+
+    rule_name = rule.get("name")
+    if isinstance(rule_name, list):
+        rule_name = ", ".join(str(r) for r in rule_name)
+    signature = _first(
+        rule_name,
+        suricata_eve_alert.get("signature"),
+        legacy_alert.get("signature"),
+    )
+    signature_id = _first(
+        rule.get("id"),
+        suricata_eve_alert.get("signature_id"),
+        legacy_alert.get("signature_id"),
+    )
+    category = rule.get("category") or suricata_eve_alert.get("category") or legacy_alert.get("category")
+    if isinstance(category, list):
+        category = ", ".join(str(c) for c in category)
+    severity = _first(
+        suricata_alert.get("severity"),
+        suricata_eve_alert.get("severity"),
+        legacy_alert.get("severity"),
+    )
+
+    # GeoIP — ECS source.geo / destination.geo, fallback to geoip.*
     src_country = (
-        ((geoip.get("src_country") or {}).get("name"))
-        or ((geoip.get("src_country") or {}).get("iso_code"))
+        _deep(source, "source", "geo", "country_name")
+        or _deep(source, "source", "geo", "country_iso_code")
+        or _deep(source, "geoip", "src_country", "name")
+        or _deep(source, "geoip", "src_country", "iso_code")
     )
     dest_country = (
-        ((geoip.get("dest_country") or {}).get("name"))
-        or ((geoip.get("dest_country") or {}).get("iso_code"))
+        _deep(source, "destination", "geo", "country_name")
+        or _deep(source, "destination", "geo", "country_iso_code")
+        or _deep(source, "geoip", "dest_country", "name")
+        or _deep(source, "geoip", "dest_country", "iso_code")
+    )
+    src_city = _deep(source, "source", "geo", "city_name")
+    src_asn = _deep(source, "source", "as", "full")
+
+    # Traffic — ECS network / client+server / suricata.flow / legacy flow
+    suri_flow = suricata.get("flow") or {}
+    legacy_flow = source.get("flow") or {}
+    pkts_to = _first(suri_flow.get("pkts_toserver"), legacy_flow.get("pkts_toserver"), net.get("packets"))
+    pkts_from = _first(suri_flow.get("pkts_toclient"), legacy_flow.get("pkts_toclient"))
+    bytes_to = _first(
+        _deep(source, "client", "bytes"),
+        suri_flow.get("bytes_toserver"),
+        legacy_flow.get("bytes_toserver"),
+    )
+    bytes_from = _first(
+        _deep(source, "server", "bytes"),
+        suri_flow.get("bytes_toclient"),
+        legacy_flow.get("bytes_toclient"),
     )
 
-    # Flow traffic
-    flow = source.get("flow") or {}
-    pkts_to = flow.get("pkts_toserver")
-    pkts_from = flow.get("pkts_toclient")
-    bytes_to = flow.get("bytes_toserver")
-    bytes_from = flow.get("bytes_toclient")
+    # Community ID
+    community_id = net.get("community_id") or source.get("community_id")
+    flow_id = _first(
+        _deep(source, "suricata", "flow_id"),
+        source.get("flow_id"),
+        source.get("rootId"),
+    )
 
     # Severity tag
     sev_col = severity_color(severity)
@@ -612,7 +917,7 @@ def print_suricata_hit(idx: int, hit: dict):
     print(f"{C.BOLD}{C.WHITE}  MATCH {idx}{C.RESET}  {sev_label}  {C.DIM}{ts or ''}{C.RESET}")
     print(f"{C.CYAN}{'─' * 70}{C.RESET}")
 
-    # ── Alert Signature (most important) ──
+    # ── Alert Signature ──
     if signature:
         print(f"  {C.BOLD}{C.RED}SIGNATURE{C.RESET}  {C.YELLOW}{signature}{C.RESET}")
     if signature_id is not None:
@@ -621,8 +926,6 @@ def print_suricata_hit(idx: int, hit: dict):
         print(f"  {C.BOLD}{C.MAGENTA}CATEGORY{C.RESET}   {category}")
 
     # ── Flow ID ──
-    flow_id = source.get("flow_id")
-    community_id = source.get("community_id")
     if flow_id:
         print(f"\n  {C.BOLD}{C.WHITE}FLOW ID{C.RESET}    {C.CYAN}{flow_id}{C.RESET}")
     if community_id:
@@ -630,13 +933,15 @@ def print_suricata_hit(idx: int, hit: dict):
 
     # ── Network Flow ──
     print(f"\n  {C.BOLD}{C.WHITE}FLOW{C.RESET}")
-    src_geo = f"  ({src_country})" if src_country else ""
+    src_geo = f"  ({src_country}" + (f", {src_city}" if src_city else "") + ")" if src_country else ""
     dst_geo = f"  ({dest_country})" if dest_country else ""
     print(f"    {C.CYAN}{src_ip}:{src_port}{C.RESET}{C.DIM}{src_geo}{C.RESET}")
     print(f"      {C.BOLD}→{C.RESET}  {proto or '?'}/{app_proto or '?'}")
     print(f"    {C.CYAN}{dest_ip}:{dest_port}{C.RESET}{C.DIM}{dst_geo}{C.RESET}")
+    if src_asn:
+        print(f"    {C.DIM}ASN: {src_asn}{C.RESET}")
 
-    # ── Traffic stats (if available) ──
+    # ── Traffic stats ──
     if any(v is not None for v in [pkts_to, pkts_from, bytes_to, bytes_from]):
         print(f"\n  {C.BOLD}{C.WHITE}TRAFFIC{C.RESET}")
         if pkts_to is not None or pkts_from is not None:
@@ -646,35 +951,22 @@ def print_suricata_hit(idx: int, hit: dict):
             b_from = _bytes_human(bytes_from)
             print(f"    Bytes:    {C.GREEN}→ {b_to}{C.RESET}  /  {C.BLUE}← {b_from}{C.RESET}")
 
-    # ── Host info (compact, if available) ──
+    # ── Host / node ──
     host = source.get("host") or {}
-    hostname = host.get("hostname")
-    host_ips = host.get("ip")
+    hostname = host.get("name") or host.get("hostname")
+    node_name = source.get("node")
     if hostname:
         print(f"\n  {C.BOLD}{C.WHITE}HOST{C.RESET}       {hostname}")
-    if host_ips:
-        if isinstance(host_ips, list):
-            host_ips = ", ".join(host_ips)
-        print(f"    {C.DIM}IPs: {host_ips}{C.RESET}")
+    elif node_name:
+        print(f"\n  {C.BOLD}{C.WHITE}NODE{C.RESET}       {node_name}")
 
-    # ── DNS (if available) ──
-    dns = source.get("dns") or {}
-    dns_query = dns.get("query")
-    if dns_query:
-        if isinstance(dns_query, list):
-            for q in dns_query:
-                qname = q.get("name") or q.get("rrname") if isinstance(q, dict) else q
-                if qname:
-                    print(f"\n  {C.BOLD}{C.WHITE}DNS{C.RESET}        {C.YELLOW}{qname}{C.RESET}")
-        elif isinstance(dns_query, dict):
-            qname = dns_query.get("name") or dns_query.get("rrname")
-            if qname:
-                print(f"\n  {C.BOLD}{C.WHITE}DNS{C.RESET}        {C.YELLOW}{qname}{C.RESET}")
-
-    # ── Kibana Link ──
+    # ── Discover / document reference ──
     if doc_id and doc_index:
-        kibana_url = build_kibana_url(doc_id, doc_index)
-        print(f"\n  {C.BOLD}{C.BLUE}KIBANA{C.RESET}     {C.DIM}{kibana_url}{C.RESET}")
+        discover_url = build_opensearch_discover_url(doc_id, doc_index)
+        if discover_url:
+            print(f"\n  {C.BOLD}{C.BLUE}DISCOVER{C.RESET}   {C.DIM}{discover_url}{C.RESET}")
+        else:
+            print(f"\n  {C.BOLD}{C.BLUE}DOCUMENT{C.RESET}  {C.DIM}index={doc_index}  id={doc_id}{C.RESET}")
 
     print(f"{C.CYAN}{'─' * 70}{C.RESET}")
 
@@ -1068,7 +1360,11 @@ def display_draft_ticket(ticket):
     for line in ticket["description"].split("\n"):
         print(f"  {line}")
 
+<<<<<<< HEAD
     # ── Steps to Reproduce (Kibana link) ──
+=======
+    # ── Steps to Reproduce (e.g. Discover permalink) ──
+>>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
     print(f"\n{C.MAGENTA}{'─' * 70}{C.RESET}")
     print(f"  {C.BOLD}{C.BLUE}Steps to Reproduce{C.RESET}")
     print(f"  {ticket['steps_to_reproduce']}")
@@ -1164,7 +1460,11 @@ def submit_mantis_ticket(ticket, api_url, api_token):
 # ── Gemini + Mantis Combined Flow ────────────────────────────────────────────
 
 def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
+<<<<<<< HEAD
     """After Kibana results, offer Gemini AI analysis and Mantis ticket submission."""
+=======
+    """After OpenSearch results, offer Gemini AI analysis and Mantis ticket submission."""
+>>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
     while True:
         print(f"\n{C.BOLD}{C.WHITE}Would you like to analyze a match with Gemini AI?{C.RESET} ", end="")
         choice = input(f"{C.DIM}(y/n): {C.RESET}").strip().lower()
@@ -1233,10 +1533,16 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
         suggested_project = match_hostname_to_project(hit_hostname)
         project = prompt_select_project(suggested=suggested_project)
 
+<<<<<<< HEAD
         # Get Kibana permalink
         kibana_link = input(
             f"\n{C.BOLD}Enter Kibana permalink{C.RESET} "
             f"{C.DIM}(https://wa-kibana.cyberrangepoulsbo.com/goto/...): {C.RESET}"
+=======
+        discover_link = input(
+            f"\n{C.BOLD}Enter OpenSearch Discover permalink (steps to reproduce){C.RESET} "
+            f"{C.DIM}(paste from Dashboards → Share, or any relevant URL): {C.RESET}"
+>>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
         ).strip()
 
         # Ticket visibility
@@ -1249,7 +1555,11 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
         ticket = {
             "summary": analysis.get("summary", "Incident Report"),
             "description": format_description_text(analysis),
+<<<<<<< HEAD
             "steps_to_reproduce": kibana_link,
+=======
+            "steps_to_reproduce": discover_link,
+>>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
             "additional_information": analysis.get("additional_information", ""),
             "project_id": project["id"],
             "project_name": project["name"],
@@ -1274,9 +1584,13 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
             print(f"{C.RED}[!] Mantis API error: {exc}{C.RESET}")
 
 
+<<<<<<< HEAD
 # Entrypoint: interactive selection, Kibana query, and/or manual AbuseIPDB checks.
+=======
+# Entrypoint: interactive selection, OpenSearch query, and/or manual AbuseIPDB checks.
+>>>>>>> 93b0a59 (Implemented OpenSearch and deprecated Kibana)
 def main():
-    """Program entrypoint: interactive mode selection, Kibana query, and/or AbuseIPDB checks."""
+    """Program entrypoint: interactive mode selection, OpenSearch query, and/or AbuseIPDB checks."""
     print(BANNER)
     args = parse_args()
     manual_ips = normalize_ips(args.ip)
@@ -1293,14 +1607,14 @@ def main():
             mode, manual_ips = prompt_user_mode_and_inputs()
             # In interactive mode, don't ask for max age; always use default.
             max_age_days = ABUSEIPDB_MAX_AGE_DAYS
-            if mode == "kibana":
+            if mode == "opensearch":
                 manual_ips = []
-                custom_query, result_count, time_gte = prompt_kibana_options()
+                custom_query, result_count, time_gte = prompt_opensearch_options()
         except (EOFError, KeyboardInterrupt):
             print(f"\n{C.YELLOW}[*] Cancelled.{C.RESET}")
             return
 
-    # Manual AbuseIPDB mode (skips Kibana query)
+    # Manual AbuseIPDB mode (skips OpenSearch query)
     if manual_ips:
         abuseipdb = load_json_file(
             ABUSEIPDB_KEY_PATH, {"api_key"}, "abuseipdb.example.json"
@@ -1316,34 +1630,42 @@ def main():
                 print(f"{C.RED}[!] AbuseIPDB error for {ip_address}: {exc}{C.RESET}")
         return
 
-    # Normal mode: Kibana query + AbuseIPDB checks for extracted IPs
-    wa_kibana = load_json_file(
-        WA_KIBANA_CRED_PATH, {"username", "password"}, "wa_kibana.example.json"
+    # Normal mode: OpenSearch query + AbuseIPDB checks for extracted IPs
+    opensearch_creds = load_json_file(
+        WA_OPENSEARCH_CRED_PATH, {"username", "password"}, "wa_opensearch.example.json"
     )
     abuseipdb = load_json_file(
         ABUSEIPDB_KEY_PATH, {"api_key"}, "abuseipdb.example.json"
     )
 
     payload = build_query_payload(query=custom_query, size=result_count, time_gte=time_gte)
-    logs = get_suricata_logs(wa_kibana["username"], wa_kibana["password"], payload)
+    logs = get_suricata_logs(
+        opensearch_creds["username"], opensearch_creds["password"], payload
+    )
     if logs:
         ip_to_context = {}  # {ip: [{idx, signature, severity, timestamp}, ...]}
         for idx, hit in enumerate(logs, start=1):
             print_suricata_hit(idx, hit)
             source = hit.get("_source", {})
-            src_ip = source.get("src_ip")
+            src_ip = _deep(source, "source", "ip") or source.get("src_ip")
             if src_ip:
-                # Extract alert details for context
-                alert = source.get("alert") or {}
-                suricata_alert = (
-                    (((source.get("suricata") or {}).get("eve") or {}).get("alert")) or {}
+                rule = source.get("rule") or {}
+                suricata_alert = _deep(source, "suricata", "alert") or {}
+                suricata_eve_alert = _deep(source, "suricata", "eve", "alert") or {}
+                legacy_alert = source.get("alert") or {}
+                rule_name = rule.get("name")
+                if isinstance(rule_name, list):
+                    rule_name = ", ".join(str(r) for r in rule_name)
+                sig = _first(
+                    rule_name,
+                    suricata_eve_alert.get("signature"),
+                    legacy_alert.get("signature"),
                 )
-                sig = (
-                    suricata_alert.get("signature")
-                    or alert.get("signature")
-                    or source.get("suricata.eve.alert.signature")
+                sev = _first(
+                    suricata_alert.get("severity"),
+                    suricata_eve_alert.get("severity"),
+                    legacy_alert.get("severity"),
                 )
-                sev = suricata_alert.get("severity") or alert.get("severity")
                 ts = source.get("@timestamp") or source.get("timestamp")
                 ip_to_context.setdefault(src_ip, []).append({
                     "idx": idx,

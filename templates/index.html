@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SOC Sentinel</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🛡️</text></svg>" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- ── Sidebar ──────────────────────────────────────────────────── -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">SOC</div>
+        <div class="brand-text">
+          <div class="brand-title">Sentinel</div>
+          <div class="brand-sub">Alert Console</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-tab="query">
+          <span class="nav-icon">🔍</span><span>Search</span>
+        </button>
+        <button class="nav-item" data-tab="alerts">
+          <span class="nav-icon">🚨</span><span>Alerts</span>
+          <span class="badge" id="badge-alerts" hidden>0</span>
+        </button>
+        <button class="nav-item" data-tab="enrichment">
+          <span class="nav-icon">🌐</span><span>IP Enrichment</span>
+          <span class="badge" id="badge-ips" hidden>0</span>
+        </button>
+        <button class="nav-item" data-tab="analysis">
+          <span class="nav-icon">🤖</span><span>AI Analysis</span>
+        </button>
+        <button class="nav-item" data-tab="tickets">
+          <span class="nav-icon">🎫</span><span>Tickets</span>
+        </button>
+        <button class="nav-item" data-tab="manual">
+          <span class="nav-icon">📘</span><span>Manual</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="theme-toggle" class="theme-btn" title="Toggle light / dark">
+          <span class="theme-icon-dark">🌙</span>
+          <span class="theme-icon-light">☀️</span>
+          <span class="theme-label">Theme</span>
+        </button>
+        <div id="secret-status" class="secrets-status"></div>
+      </div>
+    </aside>
+
+    <!-- ── Main ────────────────────────────────────────────────────── -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="tab-title">Search Alerts</h1>
+          <p id="tab-sub" class="muted">Query OpenSearch for Suricata alerts</p>
+        </div>
+        <div class="topbar-actions">
+          <span id="connection-chip" class="chip chip-muted" title="OpenSearch base URL"></span>
+        </div>
+      </header>
+
+      <!-- ░░ Toast container ░░ -->
+      <div id="toasts" class="toasts"></div>
+
+      <!-- ░░ QUERY TAB ░░ -->
+      <section class="tab active" data-tab="query">
+        <div class="grid">
+          <div class="card">
+            <div class="card-header">
+              <h2>Query Configuration</h2>
+              <p class="muted">Build a Lucene query, choose a time range, and run it against OpenSearch.</p>
+            </div>
+            <div class="card-body">
+              <form id="query-form" class="form">
+                <label class="field">
+                  <span class="field-label">Lucene query</span>
+                  <textarea id="q-query" rows="3" spellcheck="false">{{ defaults.query }}</textarea>
+                </label>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span class="field-label">Time range</span>
+                    <select id="q-time">
+                      <option value="now-15m">Last 15 minutes</option>
+                      <option value="now-1h">Last 1 hour</option>
+                      <option value="now-6h">Last 6 hours</option>
+                      <option value="now-24h">Last 24 hours</option>
+                      <option value="now-48h" selected>Last 48 hours</option>
+                      <option value="now-7d">Last 7 days</option>
+                      <option value="now-30d">Last 30 days</option>
+                      <option value="__custom__">Custom…</option>
+                    </select>
+                  </label>
+
+                  <label class="field" id="q-custom-wrap" hidden>
+                    <span class="field-label">Custom window (e.g. <code>2h</code>, <code>12h</code>, <code>3d</code>)</span>
+                    <input id="q-custom" type="text" placeholder="2h" />
+                  </label>
+
+                  <label class="field field-narrow">
+                    <span class="field-label">Results</span>
+                    <input id="q-size" type="number" min="1" max="500" value="{{ defaults.size }}" />
+                  </label>
+                </div>
+
+                <div class="actions">
+                  <button type="submit" class="btn btn-primary" id="run-btn">
+                    <span class="btn-label">Run query</span>
+                    <span class="spinner" hidden></span>
+                  </button>
+                  <button type="button" class="btn btn-ghost" id="reset-btn">Reset</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2>Example queries</h2>
+              <p class="muted">Click to copy into the query box.</p>
+            </div>
+            <div class="card-body">
+              <ul id="examples-list" class="examples-list"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ░░ ALERTS TAB ░░ -->
+      <section class="tab" data-tab="alerts">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <span class="chip" id="alerts-count-chip">0 alerts</span>
+            <span class="chip chip-muted" id="alerts-time-chip"></span>
+            <span class="chip chip-muted" id="alerts-query-chip"></span>
+          </div>
+          <div class="toolbar-right">
+            <input id="alerts-filter" type="search" placeholder="Filter by signature, IP, port…" />
+            <button id="enrich-all-btn" class="btn btn-secondary" disabled>Enrich all public IPs</button>
+          </div>
+        </div>
+
+        <div id="alerts-list" class="alerts-list">
+          <div class="empty">
+            <div class="empty-icon">🔍</div>
+            <div class="empty-title">No results yet</div>
+            <div class="muted">Head to <b>Search</b> to run a query.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ░░ ENRICHMENT TAB ░░ -->
+      <section class="tab" data-tab="enrichment">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <span class="chip" id="ips-count-chip">0 IPs</span>
+          </div>
+        </div>
+        <div id="enrichment-list" class="enrichment-list">
+          <div class="empty">
+            <div class="empty-icon">🌐</div>
+            <div class="empty-title">No IPs enriched</div>
+            <div class="muted">Run a query and use <b>Enrich all public IPs</b> (or click an IP on an alert).</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ░░ AI ANALYSIS TAB ░░ -->
+      <section class="tab" data-tab="analysis">
+        <div id="analysis-panel">
+          <div class="empty">
+            <div class="empty-icon">🤖</div>
+            <div class="empty-title">No analysis yet</div>
+            <div class="muted">Open an alert and click <b>AI analyze</b> to send it to Gemini.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ░░ TICKETS TAB ░░ -->
+      <section class="tab" data-tab="tickets">
+        <div id="tickets-panel">
+          <div class="empty">
+            <div class="empty-icon">🎫</div>
+            <div class="empty-title">No tickets drafted</div>
+            <div class="muted">Run an AI analysis first, then click <b>Create Mantis ticket</b>.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ░░ MANUAL TAB ░░ -->
+      <section class="tab" data-tab="manual">
+        <article class="card prose">
+          <div class="card-header">
+            <h2>SOC Sentinel — User Manual</h2>
+            <p class="muted">Everything you need to get up and running.</p>
+          </div>
+          <div class="card-body">
+
+            <h3>1. What this tool does</h3>
+            <ol>
+              <li><b>Searches OpenSearch</b> for Suricata IDS alerts via Dev Tools proxy or the cluster REST API.</li>
+              <li><b>Enriches public source IPs</b> through AbuseIPDB (confidence score, ISP, country, report history).</li>
+              <li><b>Analyzes alerts with Gemini</b> to produce a structured, plain-English incident report.</li>
+              <li><b>Files tickets in MantisBT</b> so the analysis lives in your case-tracking system.</li>
+            </ol>
+
+            <h3>2. Before you start — credentials</h3>
+            <p>Create these JSON files inside <code>secrets/</code> (examples are provided):</p>
+            <ul>
+              <li><code>secrets/wa_opensearch.json</code> — <code>{ "username": "...", "password": "..." }</code></li>
+              <li><code>secrets/abuseipdb.json</code> — <code>{ "api_key": "..." }</code></li>
+              <li><code>secrets/gemini.json</code> <i>(optional, for AI analysis)</i> — <code>{ "api_key": "..." }</code></li>
+              <li><code>secrets/mantis.json</code> <i>(optional, for ticket creation)</i> — <code>{ "api_url": "...", "api_token": "..." }</code></li>
+            </ul>
+            <p class="muted">Files inside <code>secrets/</code> are git-ignored; they never leave your machine.</p>
+
+            <h3>3. Running the tool</h3>
+            <ul>
+              <li><b>CLI:</b> <code>python SOC_Program.py</code></li>
+              <li><b>Web GUI:</b> <code>python SOC_Program.py --web</code> <i>or</i> <code>python web_app.py</code></li>
+            </ul>
+
+            <h3>4. The SIEM-style alert card</h3>
+            <p>Each alert on the <b>Alerts</b> tab exposes the fields a SOC analyst needs at a glance:</p>
+            <ul>
+              <li><b>Severity</b> — Suricata severity (1 = highest) shown as a colored pill.</li>
+              <li><b>Signature / SID / category</b> — what rule fired and why.</li>
+              <li><b>Network flow</b> — <code>source.ip:port → destination.ip:port</code> with GeoIP, ASN and protocol.</li>
+              <li><b>Traffic</b> — packets and bytes in each direction (human-readable).</li>
+              <li><b>Identifiers</b> — community ID, flow ID, host/node, index + doc id.</li>
+              <li><b>Actions</b> — copy IP, enrich IP via AbuseIPDB, open Discover, run AI analysis.</li>
+            </ul>
+
+            <h3>5. Query tips (Lucene)</h3>
+            <table class="manual-table">
+              <thead><tr><th>Query</th><th>What it finds</th></tr></thead>
+              <tbody>
+                <tr><td><code>event.kind:"alert"</code></td><td>All alerts</td></tr>
+                <tr><td><code>suricata.eve.alert.severity:[1 TO 2]</code></td><td>Only high/critical alerts</td></tr>
+                <tr><td><code>rule.name:ET*</code></td><td>Emerging Threats matches</td></tr>
+                <tr><td><code>rule.name:(*C2* OR *BOTNET* OR *EXPLOIT*)</code></td><td>C2, botnet or exploit activity</td></tr>
+                <tr><td><code>source.ip:"1.2.3.4"</code></td><td>Alerts from a specific IP</td></tr>
+              </tbody>
+            </table>
+
+            <h3>6. Keyboard shortcuts</h3>
+            <ul>
+              <li><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> — run the current query</li>
+              <li><kbd>/</kbd> — jump to the alerts filter</li>
+              <li><kbd>T</kbd> — toggle light/dark theme</li>
+              <li><kbd>1</kbd>–<kbd>6</kbd> — switch tabs</li>
+            </ul>
+
+            <h3>7. Troubleshooting</h3>
+            <table class="manual-table">
+              <thead><tr><th>Problem</th><th>Fix</th></tr></thead>
+              <tbody>
+                <tr><td>Red <code>Missing secrets file</code> toast</td><td>Copy the matching <code>.example.json</code> in <code>secrets/</code> and fill in values.</td></tr>
+                <tr><td>401 Unauthorized</td><td>Wrong OpenSearch username / password.</td></tr>
+                <tr><td>404 from OpenSearch</td><td>Set <code>OPENSEARCH_INDEX_PATTERN</code> to the right index, or switch transport with <code>OPENSEARCH_TRANSPORT=cluster</code>.</td></tr>
+                <tr><td>Gemini 429</td><td>You hit the free-tier rate limit — wait a minute, the app retries automatically.</td></tr>
+              </tbody>
+            </table>
+
+          </div>
+        </article>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ░░ Alert details modal ░░ -->
+  <div id="modal-root" class="modal-root" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal" role="dialog" aria-modal="true">
+      <header class="modal-header">
+        <h3 id="modal-title">Alert details</h3>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script>
+    window.SOC_DEFAULTS = {{ defaults | tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

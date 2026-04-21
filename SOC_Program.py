@@ -20,9 +20,16 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-# ── ANSI Color Helpers ────────────────────────────────────────────────────────
-# Enable ANSI escape codes on Windows 10+ terminals
+# -- Windows console setup -----------------------------------------------------
 if sys.platform == "win32":
+    # Force UTF-8 stdout/stderr so Unicode symbols (+, =, -, etc.) don't crash
+    # on Windows machines whose default console encoding is cp1252 / charmap.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
+    # Enable ANSI escape codes on Windows 10+ terminals
     try:
         import ctypes
         kernel32 = ctypes.windll.kernel32
@@ -303,6 +310,27 @@ def parse_args():
         action="store_true",
         help="Request verbose AbuseIPDB output (includes extra fields when available).",
     )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Launch the browser-based GUI instead of the interactive CLI.",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.getenv("SOC_WEB_HOST", "127.0.0.1"),
+        help="Host interface for --web (default: 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("SOC_WEB_PORT", "5001")),
+        help="Port for --web (default: 5000).",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="When running --web, do not auto-open a browser tab.",
+    )
     return parser.parse_args()
 
 
@@ -310,14 +338,14 @@ def parse_args():
 def prompt_opensearch_options():
     """Prompt the user for a custom Lucene query, timeframe, and how many results to return."""
     print(f"\n{C.BOLD}{C.WHITE}Query Configuration{C.RESET}")
-    print(f"{C.CYAN}{'─' * 70}{C.RESET}")
+    print(f"{C.CYAN}{'-' * 70}{C.RESET}")
     print(f"  {C.DIM}Default query:{C.RESET} {C.YELLOW}{DEFAULT_QUERY}{C.RESET}")
     print(f"  {C.DIM}Default time range:{C.RESET} {DEFAULT_TIME_RANGE} to now")
 
     print(f"\n  {C.BOLD}{C.WHITE}Example queries (Lucene syntax for OpenSearch):{C.RESET}")
-    print(f"  {C.DIM}─────────────────────────────────────────────────────────────{C.RESET}")
+    print(f"  {C.DIM}-------------------------------------------------------------{C.RESET}")
     print(f"  {C.YELLOW}event.kind:\"alert\"{C.RESET}")
-    print(f"    {C.DIM}All alerts (ECS field — works with Malcolm / Arkime){C.RESET}")
+    print(f"    {C.DIM}All alerts (ECS field -- works with Malcolm / Arkime){C.RESET}")
     print(f"  {C.YELLOW}event.kind:\"alert\" AND suricata.eve.alert.severity:[1 TO 2]{C.RESET}")
     print(f"    {C.DIM}High / critical severity alerts only{C.RESET}")
     print(f"  {C.YELLOW}rule.name:ET* AND event.kind:\"alert\"{C.RESET}")
@@ -332,7 +360,7 @@ def prompt_opensearch_options():
     print(f"    {C.DIM}C2, botnet, or exploit activity{C.RESET}")
     print(f"  {C.YELLOW}network.application:\"dns\" AND destination.ip:*{C.RESET}")
     print(f"    {C.DIM}DNS traffic to external destinations{C.RESET}")
-    print(f"  {C.DIM}─────────────────────────────────────────────────────────────{C.RESET}")
+    print(f"  {C.DIM}-------------------------------------------------------------{C.RESET}")
 
     # Timeframe selection (standard presets + custom)
     presets = [
@@ -392,9 +420,9 @@ def prompt_opensearch_options():
         print(f"{C.YELLOW}[!] Invalid number, using default ({DEFAULT_RESULT_COUNT}).{C.RESET}")
         count = DEFAULT_RESULT_COUNT
 
-    print(f"\n{C.GREEN}[✓] Query:{C.RESET}   {C.YELLOW}{query}{C.RESET}")
-    print(f"{C.GREEN}[✓] Time:{C.RESET}    {time_gte} → now")
-    print(f"{C.GREEN}[✓] Results:{C.RESET} {count}")
+    print(f"\n{C.GREEN}[+] Query:{C.RESET}   {C.YELLOW}{query}{C.RESET}")
+    print(f"{C.GREEN}[+] Time:{C.RESET}    {time_gte} -> now")
+    print(f"{C.GREEN}[+] Results:{C.RESET} {count}")
     return query, count, time_gte
 
 
@@ -465,7 +493,7 @@ def get_suricata_logs(username: str, password: str, payload: dict):
             idx = OPENSEARCH_INDEX_PATTERN.strip().strip("/")
             proxy_path = f"/{idx}/_search" if idx else "/_search"
             print(
-                f"{C.DIM}    Transport: Dev Tools proxy  →  "
+                f"{C.DIM}    Transport: Dev Tools proxy  ->  "
                 f"path={proxy_path!r}  opensearch_method={OPENSEARCH_SEARCH_HTTP_METHOD}{C.RESET}"
             )
             print(
@@ -504,7 +532,7 @@ def get_suricata_logs(username: str, password: str, payload: dict):
             search_url = opensearch_search_url()
             method = OPENSEARCH_SEARCH_HTTP_METHOD
             print(
-                f"{C.DIM}    Transport: cluster  →  {method} {search_url}{C.RESET}"
+                f"{C.DIM}    Transport: cluster  ->  {method} {search_url}{C.RESET}"
             )
             print(
                 f"{C.DIM}    Index pattern env: OPENSEARCH_INDEX_PATTERN={OPENSEARCH_INDEX_PATTERN!r}{C.RESET}"
@@ -546,12 +574,12 @@ def get_suricata_logs(username: str, password: str, payload: dict):
         hits = data.get("hits", {}).get("hits", []) or []
         total = _search_total_hits(data)
         print(
-            f"{C.GREEN}[✓] Retrieved {len(hits)} document(s) in this page "
+            f"{C.GREEN}[+] Retrieved {len(hits)} document(s) in this page "
             f"({total} total matches in index scope).{C.RESET}"
         )
         if total == 0 and len(hits) == 0:
             print(
-                f"{C.YELLOW}[!] Zero hits — the Lucene query is in the JSON body (query_string). "
+                f"{C.YELLOW}[!] Zero hits -- the Lucene query is in the JSON body (query_string). "
                 f"If Dev Tools works with a different index name, set e.g.{C.RESET}\n"
                 f"  {C.DIM}export OPENSEARCH_INDEX_PATTERN='your-index-*'{C.RESET}\n"
                 f"  {C.DIM}Run in Dev Tools: GET _cat/indices?v  (to see real index names){C.RESET}"
@@ -567,16 +595,19 @@ def get_suricata_logs(username: str, password: str, payload: dict):
                 f"{C.YELLOW}[!] 404 usually means wrong path, index pattern, or transport.{C.RESET}\n"
                 f"  {C.DIM}• Default is Dev Tools proxy (OPENSEARCH_TRANSPORT=dev_tools). "
                 f"If your host is raw OpenSearch only, try OPENSEARCH_TRANSPORT=cluster{C.RESET}\n"
-                f"  {C.DIM}• Cluster mode: some gateways block POST to _search — use "
+                f"  {C.DIM}• Cluster mode: some gateways block POST to _search -- use "
                 f"OPENSEARCH_SEARCH_HTTP_METHOD=GET or POST as needed{C.RESET}\n"
                 f"  {C.DIM}• Try OPENSEARCH_INDEX_PATTERN if indices are not named {OPENSEARCH_INDEX_PATTERN!r}{C.RESET}\n"
                 f"  {C.DIM}• Cluster subpath: OPENSEARCH_PATH_PREFIX; wildcards: OPENSEARCH_RAW_INDEX_IN_URL=1{C.RESET}\n"
                 f"  {C.DIM}• Failed URL: {url}{C.RESET}"
             )
-        return []
+        raise  # re-raise so callers (web API, CLI) can show the real error
+    except requests.exceptions.ConnectionError as e:
+        # DNS failure, VPN not connected, host unreachable, etc.
+        raise  # always re-raise so callers surface a real error message
     except Exception as e:
         print(f"{C.RED}[!] Error: {e}{C.RESET}")
-        return []
+        raise
 
 
 # Extract unique public source IPs from search hits (ECS source.ip, fallback src_ip).
@@ -625,7 +656,7 @@ def print_abuseipdb_report(ip_address: str, data: dict, match_context=None):
     sc = abuse_score_color(score)
 
     # Header
-    print(f"\n{C.BOLD}{C.MAGENTA}{'═' * 70}{C.RESET}")
+    print(f"\n{C.BOLD}{C.MAGENTA}{'=' * 70}{C.RESET}")
     print(f"  {C.BOLD}{C.WHITE}AbuseIPDB Report:{C.RESET}  {C.CYAN}{ip_address}{C.RESET}")
 
     if match_context:
@@ -639,7 +670,7 @@ def print_abuseipdb_report(ip_address: str, data: dict, match_context=None):
             print(f"    {C.BOLD}Match {m['idx']}{C.RESET}  {sev_tag}  {C.YELLOW}{sig}{C.RESET}")
             if ts:
                 print(f"             {C.DIM}{ts}{C.RESET}")
-    print(f"{C.MAGENTA}{'─' * 70}{C.RESET}")
+    print(f"{C.MAGENTA}{'-' * 70}{C.RESET}")
 
     # Abuse score (prominent)
     score_bar = "█" * (score // 5) + "░" * (20 - score // 5)
@@ -649,7 +680,7 @@ def print_abuseipdb_report(ip_address: str, data: dict, match_context=None):
     # Whitelisted?
     wl = data.get("isWhitelisted")
     if wl:
-        print(f"  {C.GREEN}{C.BOLD}✓ WHITELISTED{C.RESET}")
+        print(f"  {C.GREEN}{C.BOLD}+ WHITELISTED{C.RESET}")
 
     # Location
     country = data.get("countryName") or data.get("countryCode")
@@ -679,7 +710,7 @@ def print_abuseipdb_report(ip_address: str, data: dict, match_context=None):
     if last_reported:
         print(f"  {C.BOLD}{C.WHITE}Last Seen{C.RESET}    {last_reported}")
 
-    print(f"{C.MAGENTA}{'─' * 70}{C.RESET}")
+    print(f"{C.MAGENTA}{'-' * 70}{C.RESET}")
 
 
 # Convert bytes to a human-friendly string (B, KB, MB, GB).
@@ -742,7 +773,7 @@ def print_suricata_hit(idx: int, hit: dict):
 
     ts = source.get("@timestamp") or source.get("timestamp")
 
-    # ECS: source.ip / destination.ip — fallback to legacy src_ip / dest_ip
+    # ECS: source.ip / destination.ip -- fallback to legacy src_ip / dest_ip
     src_ip = _deep(source, "source", "ip") or source.get("src_ip")
     dest_ip = _deep(source, "destination", "ip") or source.get("dest_ip")
     src_port = _deep(source, "source", "port") or source.get("src_port")
@@ -782,7 +813,7 @@ def print_suricata_hit(idx: int, hit: dict):
         legacy_alert.get("severity"),
     )
 
-    # GeoIP — ECS source.geo / destination.geo, fallback to geoip.*
+    # GeoIP -- ECS source.geo / destination.geo, fallback to geoip.*
     src_country = (
         _deep(source, "source", "geo", "country_name")
         or _deep(source, "source", "geo", "country_iso_code")
@@ -798,7 +829,7 @@ def print_suricata_hit(idx: int, hit: dict):
     src_city = _deep(source, "source", "geo", "city_name")
     src_asn = _deep(source, "source", "as", "full")
 
-    # Traffic — ECS network / client+server / suricata.flow / legacy flow
+    # Traffic -- ECS network / client+server / suricata.flow / legacy flow
     suri_flow = suricata.get("flow") or {}
     legacy_flow = source.get("flow") or {}
     pkts_to = _first(suri_flow.get("pkts_toserver"), legacy_flow.get("pkts_toserver"), net.get("packets"))
@@ -826,12 +857,12 @@ def print_suricata_hit(idx: int, hit: dict):
     sev_col = severity_color(severity)
     sev_label = f"{sev_col}{C.BOLD} SEV {severity} {C.RESET}" if severity is not None else ""
 
-    # ── Header ──
-    print(f"\n{C.BOLD}{C.CYAN}{'═' * 70}{C.RESET}")
+    # -- Header --
+    print(f"\n{C.BOLD}{C.CYAN}{'=' * 70}{C.RESET}")
     print(f"{C.BOLD}{C.WHITE}  MATCH {idx}{C.RESET}  {sev_label}  {C.DIM}{ts or ''}{C.RESET}")
-    print(f"{C.CYAN}{'─' * 70}{C.RESET}")
+    print(f"{C.CYAN}{'-' * 70}{C.RESET}")
 
-    # ── Alert Signature ──
+    # -- Alert Signature --
     if signature:
         print(f"  {C.BOLD}{C.RED}SIGNATURE{C.RESET}  {C.YELLOW}{signature}{C.RESET}")
     if signature_id is not None:
@@ -839,33 +870,33 @@ def print_suricata_hit(idx: int, hit: dict):
     if category:
         print(f"  {C.BOLD}{C.MAGENTA}CATEGORY{C.RESET}   {category}")
 
-    # ── Flow ID ──
+    # -- Flow ID --
     if flow_id:
         print(f"\n  {C.BOLD}{C.WHITE}FLOW ID{C.RESET}    {C.CYAN}{flow_id}{C.RESET}")
     if community_id:
         print(f"  {C.DIM}Community: {community_id}{C.RESET}")
 
-    # ── Network Flow ──
+    # -- Network Flow --
     print(f"\n  {C.BOLD}{C.WHITE}FLOW{C.RESET}")
     src_geo = f"  ({src_country}" + (f", {src_city}" if src_city else "") + ")" if src_country else ""
     dst_geo = f"  ({dest_country})" if dest_country else ""
     print(f"    {C.CYAN}{src_ip}:{src_port}{C.RESET}{C.DIM}{src_geo}{C.RESET}")
-    print(f"      {C.BOLD}→{C.RESET}  {proto or '?'}/{app_proto or '?'}")
+    print(f"      {C.BOLD}->{C.RESET}  {proto or '?'}/{app_proto or '?'}")
     print(f"    {C.CYAN}{dest_ip}:{dest_port}{C.RESET}{C.DIM}{dst_geo}{C.RESET}")
     if src_asn:
         print(f"    {C.DIM}ASN: {src_asn}{C.RESET}")
 
-    # ── Traffic stats ──
+    # -- Traffic stats --
     if any(v is not None for v in [pkts_to, pkts_from, bytes_to, bytes_from]):
         print(f"\n  {C.BOLD}{C.WHITE}TRAFFIC{C.RESET}")
         if pkts_to is not None or pkts_from is not None:
-            print(f"    Packets:  {C.GREEN}→ {pkts_to or 0}{C.RESET}  /  {C.BLUE}← {pkts_from or 0}{C.RESET}")
+            print(f"    Packets:  {C.GREEN}-> {pkts_to or 0}{C.RESET}  /  {C.BLUE}<- {pkts_from or 0}{C.RESET}")
         if bytes_to is not None or bytes_from is not None:
             b_to = _bytes_human(bytes_to)
             b_from = _bytes_human(bytes_from)
-            print(f"    Bytes:    {C.GREEN}→ {b_to}{C.RESET}  /  {C.BLUE}← {b_from}{C.RESET}")
+            print(f"    Bytes:    {C.GREEN}-> {b_to}{C.RESET}  /  {C.BLUE}<- {b_from}{C.RESET}")
 
-    # ── Host / node ──
+    # -- Host / node --
     host = source.get("host") or {}
     hostname = host.get("name") or host.get("hostname")
     node_name = source.get("node")
@@ -874,7 +905,7 @@ def print_suricata_hit(idx: int, hit: dict):
     elif node_name:
         print(f"\n  {C.BOLD}{C.WHITE}NODE{C.RESET}       {node_name}")
 
-    # ── Discover / document reference ──
+    # -- Discover / document reference --
     if doc_id and doc_index:
         discover_url = build_opensearch_discover_url(doc_id, doc_index)
         if discover_url:
@@ -882,10 +913,10 @@ def print_suricata_hit(idx: int, hit: dict):
         else:
             print(f"\n  {C.BOLD}{C.BLUE}DOCUMENT{C.RESET}  {C.DIM}index={doc_index}  id={doc_id}{C.RESET}")
 
-    print(f"{C.CYAN}{'─' * 70}{C.RESET}")
+    print(f"{C.CYAN}{'-' * 70}{C.RESET}")
 
 
-# ── Editor + Data Preview Helpers ─────────────────────────────────────────────
+# -- Editor + Data Preview Helpers ---------------------------------------------
 
 def open_in_editor(text, suffix=".txt"):
     """Open text in the user's default text editor and return the edited result."""
@@ -929,10 +960,10 @@ def preview_and_cleanse_data(message):
 
     while True:
         print(f"\n{C.BOLD}{C.WHITE}Data to be sent to Gemini AI:{C.RESET}")
-        print(f"{C.CYAN}{'─' * 70}{C.RESET}")
+        print(f"{C.CYAN}{'-' * 70}{C.RESET}")
         for line in current.split("\n"):
             print(f"  {C.DIM}{line}{C.RESET}")
-        print(f"{C.CYAN}{'─' * 70}{C.RESET}")
+        print(f"{C.CYAN}{'-' * 70}{C.RESET}")
 
         print(f"\n  {C.GREEN}1){C.RESET} Confirm and send")
         print(f"  {C.CYAN}2){C.RESET} Edit / cleanse in text editor")
@@ -948,7 +979,7 @@ def preview_and_cleanse_data(message):
                 current = edited.strip()
                 print(f"{C.GREEN}[+] Data updated from editor. Showing updated preview...{C.RESET}")
             else:
-                print(f"{C.YELLOW}[!] Editor returned empty — keeping previous version.{C.RESET}")
+                print(f"{C.YELLOW}[!] Editor returned empty -- keeping previous version.{C.RESET}")
         elif choice == "3":
             return None
         else:
@@ -979,7 +1010,7 @@ def edit_text_field(current_value, field_name):
         return current_value
 
 
-# ── Gemini AI Analysis ────────────────────────────────────────────────────────
+# -- Gemini AI Analysis --------------------------------------------------------
 
 def build_gemini_prompt(message_text):
     """Build the Gemini prompt by loading the template from prompts/gemini_prompt.md."""
@@ -1038,7 +1069,7 @@ def analyze_with_gemini(message_text, api_key, max_retries=5):
 
     # All retries exhausted
     raise Exception(
-        "Gemini API rate limit (429) — all retries exhausted. "
+        "Gemini API rate limit (429) -- all retries exhausted. "
         "Wait a few minutes and try again. "
         "You can also try a different model by setting GEMINI_MODEL env var "
         "(e.g. set GEMINI_MODEL=gemini-1.5-flash)."
@@ -1047,11 +1078,11 @@ def analyze_with_gemini(message_text, api_key, max_retries=5):
 
 def format_description_text(analysis):
     """Format the Gemini analysis dict into the Mantis description field text."""
-    sep = "─" * 40
+    sep = "-" * 40
     lines = [
-        f"{'═' * 50}",
+        f"{'=' * 50}",
         f"  NETWORK DETAILS",
-        f"{'─' * 50}",
+        f"{'-' * 50}",
         f"  Time and Date      : {analysis.get('time_and_date', 'N/A')}",
         f"  Network Protocol   : {analysis.get('network_protocol', 'N/A')}",
         f"  Flow ID            : {analysis.get('flow_id', 'N/A')}",
@@ -1066,9 +1097,9 @@ def format_description_text(analysis):
         f"  Destination Port    : {analysis.get('destination_port', 'N/A')}",
         f"  Destination Bytes   : {analysis.get('destination_bytes', 'N/A')}",
         "",
-        f"{'═' * 50}",
+        f"{'=' * 50}",
         f"  INCIDENT ANALYSIS",
-        f"{'─' * 50}",
+        f"{'-' * 50}",
         f"  Event              : {analysis.get('event', 'N/A')}",
         f"  Target Asset       : {analysis.get('target_asset', 'N/A')}",
         "",
@@ -1084,27 +1115,27 @@ def format_description_text(analysis):
         f"  Key Details:",
         f"    {analysis.get('key_details', 'N/A')}",
         "",
-        f"{'═' * 50}",
+        f"{'=' * 50}",
         f"  RECOMMENDED ACTION",
-        f"{'─' * 50}",
+        f"{'-' * 50}",
         f"  {analysis.get('security_action', 'N/A')}",
-        f"{'═' * 50}",
+        f"{'=' * 50}",
     ]
     return "\n".join(lines)
 
 
 def display_analysis(analysis):
     """Display the Gemini AI analysis in a clean, color-coded format."""
-    print(f"\n{C.BOLD}{C.GREEN}{'═' * 70}{C.RESET}")
+    print(f"\n{C.BOLD}{C.GREEN}{'=' * 70}{C.RESET}")
     print(f"  {C.BOLD}{C.WHITE}GEMINI AI INCIDENT REPORT{C.RESET}")
-    print(f"{C.GREEN}{'═' * 70}{C.RESET}")
+    print(f"{C.GREEN}{'=' * 70}{C.RESET}")
 
     print(f"\n  {C.BOLD}{C.YELLOW}Summary{C.RESET}")
     print(f"  {analysis.get('summary', 'N/A')}")
 
-    # ── Network Details ──
+    # -- Network Details --
     print(f"\n  {C.BOLD}{C.CYAN}Network Details{C.RESET}")
-    print(f"  {C.CYAN}{'─' * 50}{C.RESET}")
+    print(f"  {C.CYAN}{'-' * 50}{C.RESET}")
     net_fields = [
         ("Time and Date",    "time_and_date"),
         ("Network Protocol", "network_protocol"),
@@ -1136,9 +1167,9 @@ def display_analysis(analysis):
         val = analysis.get(key, "N/A")
         print(f"      {C.WHITE}{label:10s}{C.RESET}  {val}")
 
-    # ── Incident Analysis ──
+    # -- Incident Analysis --
     print(f"\n  {C.BOLD}{C.MAGENTA}Incident Analysis{C.RESET}")
-    print(f"  {C.MAGENTA}{'─' * 50}{C.RESET}")
+    print(f"  {C.MAGENTA}{'-' * 50}{C.RESET}")
     print(f"    {C.BOLD}{C.RED}Event:{C.RESET}           {analysis.get('event', 'N/A')}")
     print(f"    {C.BOLD}{C.WHITE}Target Asset:{C.RESET}   {analysis.get('target_asset', 'N/A')}")
 
@@ -1153,22 +1184,22 @@ def display_analysis(analysis):
         print(f"\n    {C.BOLD}{C.WHITE}{label}:{C.RESET}")
         print(f"    {C.DIM}{val}{C.RESET}")
 
-    # ── Recommended Action ──
+    # -- Recommended Action --
     print(f"\n  {C.BOLD}{C.YELLOW}Recommended Action{C.RESET}")
-    print(f"  {C.YELLOW}{'─' * 50}{C.RESET}")
+    print(f"  {C.YELLOW}{'-' * 50}{C.RESET}")
     print(f"    {analysis.get('security_action', 'N/A')}")
 
-    # ── Additional Info ──
+    # -- Additional Info --
     addl = analysis.get("additional_information", "N/A")
     if addl and addl != "N/A":
         print(f"\n  {C.BOLD}{C.BLUE}Additional Info{C.RESET}")
-        print(f"  {C.BLUE}{'─' * 50}{C.RESET}")
+        print(f"  {C.BLUE}{'-' * 50}{C.RESET}")
         print(f"    {addl}")
 
-    print(f"\n{C.GREEN}{'═' * 70}{C.RESET}")
+    print(f"\n{C.GREEN}{'=' * 70}{C.RESET}")
 
 
-# ── Mantis Ticket Submission ─────────────────────────────────────────────────
+# -- Mantis Ticket Submission -------------------------------------------------
 
 def match_hostname_to_project(hostname):
     """Try to match a hostname from the alert to a Mantis project.
@@ -1212,7 +1243,7 @@ def prompt_select_project(suggested=None):
     If *suggested* is provided (a project dict), offer it as the default choice.
     """
     if suggested:
-        print(f"\n{C.GREEN}[✓] Auto-detected project from hostname: "
+        print(f"\n{C.GREEN}[+] Auto-detected project from hostname: "
               f"{C.BOLD}{suggested['name']}{C.RESET}{C.GREEN} (ID: {suggested['id']}){C.RESET}")
         confirm = input(
             f"{C.BOLD}Use this project? {C.RESET}{C.DIM}(Y/n): {C.RESET}"
@@ -1250,43 +1281,43 @@ def display_draft_ticket(ticket):
     """Display the draft Mantis ticket for user review."""
     vis = ticket.get("view_state", "private")
     vis_color = C.GREEN if vis == "public" else C.YELLOW
-    vis_icon = "🌐" if vis == "public" else "🔒"
+    vis_icon = "[Public]" if vis == "public" else "[Private]"
 
-    print(f"\n{C.BOLD}{C.MAGENTA}{'═' * 70}{C.RESET}")
+    print(f"\n{C.BOLD}{C.MAGENTA}{'=' * 70}{C.RESET}")
     print(f"  {C.BOLD}{C.WHITE}DRAFT MANTIS TICKET{C.RESET}")
-    print(f"{C.MAGENTA}{'─' * 70}{C.RESET}")
+    print(f"{C.MAGENTA}{'-' * 70}{C.RESET}")
 
-    # ── Metadata ──
+    # -- Metadata --
     print(f"  {C.BOLD}{C.WHITE}Project:{C.RESET}        {C.CYAN}{ticket['project_name']}{C.RESET} {C.DIM}(ID: {ticket['project_id']}){C.RESET}")
     print(f"  {C.BOLD}{C.WHITE}Visibility:{C.RESET}     {vis_color}{vis_icon}  {vis.upper()}{C.RESET}")
     print(f"  {C.BOLD}{C.WHITE}Category:{C.RESET}       Bellevue College")
     print(f"  {C.BOLD}{C.WHITE}Priority:{C.RESET}       normal")
     print(f"  {C.BOLD}{C.WHITE}Severity:{C.RESET}       minor")
 
-    # ── Summary ──
-    print(f"\n{C.MAGENTA}{'─' * 70}{C.RESET}")
+    # -- Summary --
+    print(f"\n{C.MAGENTA}{'-' * 70}{C.RESET}")
     print(f"  {C.BOLD}{C.YELLOW}Summary{C.RESET}")
     print(f"  {ticket['summary']}")
 
-    # ── Description ──
-    print(f"\n{C.MAGENTA}{'─' * 70}{C.RESET}")
+    # -- Description --
+    print(f"\n{C.MAGENTA}{'-' * 70}{C.RESET}")
     print(f"  {C.BOLD}{C.CYAN}Description{C.RESET}")
     for line in ticket["description"].split("\n"):
         print(f"  {line}")
 
-    # ── Steps to Reproduce (e.g. Discover permalink) ──
-    print(f"\n{C.MAGENTA}{'─' * 70}{C.RESET}")
+    # -- Steps to Reproduce (e.g. Discover permalink) --
+    print(f"\n{C.MAGENTA}{'-' * 70}{C.RESET}")
     print(f"  {C.BOLD}{C.BLUE}Steps to Reproduce{C.RESET}")
     print(f"  {ticket['steps_to_reproduce']}")
 
-    # ── Additional Info ──
+    # -- Additional Info --
     addl = ticket.get("additional_information", "")
     if addl:
-        print(f"\n{C.MAGENTA}{'─' * 70}{C.RESET}")
+        print(f"\n{C.MAGENTA}{'-' * 70}{C.RESET}")
         print(f"  {C.BOLD}{C.GREEN}Additional Info{C.RESET}")
         print(f"  {addl}")
 
-    print(f"{C.MAGENTA}{'═' * 70}{C.RESET}")
+    print(f"{C.MAGENTA}{'=' * 70}{C.RESET}")
 
 
 def prompt_edit_ticket(ticket):
@@ -1298,14 +1329,14 @@ def prompt_edit_ticket(ticket):
         toggle_label = "public" if vis == "private" else "private"
 
         print(f"\n  {C.BOLD}{C.WHITE}Actions:{C.RESET}")
-        print(f"  {C.CYAN}{'─' * 40}{C.RESET}")
+        print(f"  {C.CYAN}{'-' * 40}{C.RESET}")
         print(f"    {C.GREEN}1){C.RESET}  {C.GREEN}Submit ticket{C.RESET}")
         print(f"    {C.CYAN}2){C.RESET}  Edit summary")
         print(f"    {C.CYAN}3){C.RESET}  Edit description")
         print(f"    {C.CYAN}4){C.RESET}  Edit steps to reproduce")
         print(f"    {C.CYAN}5){C.RESET}  Edit additional information")
         print(f"    {C.CYAN}6){C.RESET}  Change project")
-        print(f"    {C.CYAN}7){C.RESET}  Toggle visibility → {C.YELLOW}{toggle_label}{C.RESET}")
+        print(f"    {C.CYAN}7){C.RESET}  Toggle visibility -> {C.YELLOW}{toggle_label}{C.RESET}")
         print(f"    {C.RED}8){C.RESET}  {C.RED}Cancel{C.RESET}")
 
         choice = input(f"\n{C.BOLD}  Choose an option (1-8): {C.RESET}").strip()
@@ -1367,7 +1398,7 @@ def submit_mantis_ticket(ticket, api_url, api_token):
     return response.json()
 
 
-# ── Gemini + Mantis Combined Flow ────────────────────────────────────────────
+# -- Gemini + Mantis Combined Flow --------------------------------------------
 
 def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
     """After OpenSearch results, offer Gemini AI analysis and Mantis ticket submission."""
@@ -1441,12 +1472,12 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
 
         discover_link = input(
             f"\n{C.BOLD}Enter OpenSearch Discover permalink (steps to reproduce){C.RESET} "
-            f"{C.DIM}(paste from Dashboards → Share, or any relevant URL): {C.RESET}"
+            f"{C.DIM}(paste from Dashboards -> Share, or any relevant URL): {C.RESET}"
         ).strip()
 
         # Ticket visibility
-        print(f"\n  {C.CYAN}1){C.RESET} {C.YELLOW}🔒 Private{C.RESET} {C.DIM}(default — only your team can see it){C.RESET}")
-        print(f"  {C.CYAN}2){C.RESET} {C.GREEN}🌐 Public{C.RESET}  {C.DIM}(visible to all MantisBT users){C.RESET}")
+        print(f"\n  {C.CYAN}1){C.RESET} {C.YELLOW}[Private] Private{C.RESET} {C.DIM}(default -- only your team can see it){C.RESET}")
+        print(f"  {C.CYAN}2){C.RESET} {C.GREEN}[Public] Public{C.RESET}  {C.DIM}(visible to all MantisBT users){C.RESET}")
         vis_choice = input(f"{C.BOLD}Visibility (1/2, Enter for private): {C.RESET}").strip()
         view_state = "public" if vis_choice == "2" else "private"
 
@@ -1484,6 +1515,22 @@ def main():
     print(BANNER)
     args = parse_args()
 
+    # Browser GUI mode: delegate to the Flask app defined in web_app.py.
+    if args.web:
+        try:
+            import web_app  # local module
+        except ImportError as exc:
+            print(f"{C.RED}[!] Web GUI requires Flask. Run: pip install -r requirements.txt{C.RESET}")
+            print(f"{C.DIM}    Import error: {exc}{C.RESET}")
+            return
+        web_app.run(
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+            debug=False,
+        )
+        return
+
     max_age_days = args.max_age_days
     abuse_verbose = args.abuse_verbose
     custom_query = DEFAULT_QUERY
@@ -1506,9 +1553,19 @@ def main():
     )
 
     payload = build_query_payload(query=custom_query, size=result_count, time_gte=time_gte)
-    logs = get_suricata_logs(
-        opensearch_creds["username"], opensearch_creds["password"], payload
-    )
+    try:
+        logs = get_suricata_logs(
+            opensearch_creds["username"], opensearch_creds["password"], payload
+        )
+    except requests.exceptions.ConnectionError as e:
+        print(
+            f"{C.RED}[!] Cannot reach OpenSearch -- DNS/network failure.{C.RESET}\n"
+            f"  {C.DIM}Are you connected to the VPN? ({e}){C.RESET}"
+        )
+        return
+    except Exception as e:
+        print(f"{C.RED}[!] OpenSearch query failed: {e}{C.RESET}")
+        return
     if logs:
         ip_to_context = {}  # {ip: [{idx, signature, severity, timestamp}, ...]}
         for idx, hit in enumerate(logs, start=1):

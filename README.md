@@ -42,11 +42,39 @@ cp secrets/abuseipdb.example.json     secrets/abuseipdb.json
 
 ### 3. Run It
 
+You can use **either** the terminal UI or the browser GUI — they share the same code.
+
+**Terminal (original CLI):**
+
 ```bash
 python SOC_Program.py
 ```
 
 The tool will ask you to pick a time range, enter a search query, and choose how many results to show. After that, everything runs automatically.
+
+**Browser GUI:**
+
+```bash
+python SOC_Program.py --web        # or: python web_app.py
+```
+
+That starts a local Flask server on <http://127.0.0.1:5000/> and opens your default browser. The web UI gives you:
+
+- Light & dark themes (toggle in the bottom-left, or press `T`)
+- A Search tab with timerange presets, Lucene examples, and keyboard shortcut <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to run
+- A SIEM-style Alerts tab with severity pills, source/destination flows, GeoIP, traffic stats, and expandable raw JSON
+- One-click AbuseIPDB enrichment of any public source IP
+- Gemini-powered AI analysis with an in-page redaction step before sending
+- Drafting + submitting MantisBT tickets, with automatic project detection from the host name
+- A built-in Manual tab with documentation and keyboard shortcuts
+
+Useful flags for `--web`:
+
+| Flag | What it does |
+|------|--------------|
+| `--host 0.0.0.0` | Bind on all interfaces (default is loopback only) |
+| `--port 8000` | Use a different port (default 5000) |
+| `--no-browser` | Don't auto-open a browser tab |
 
 ---
 

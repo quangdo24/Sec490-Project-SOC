@@ -75,6 +75,65 @@ def _bytes_human(value) -> str:
     return soc._bytes_human(value)
 
 
+def _build_alert_message(source: dict, fields: dict) -> str:
+    """Build a structured alert message for Gemini from available fields.
+
+    Uses the raw ``message`` field from _source when present; otherwise
+    assembles a plain-text summary from the extracted alert fields so that
+    every alert can be sent to Gemini regardless of index mapping.
+    """
+    raw = (source.get("message") or "").strip()
+    if raw:
+        return raw
+
+    def _v(val) -> Optional[str]:
+        """Stringify a field value; flatten lists; return None for blanks."""
+        if val is None or val == "" or val == []:
+            return None
+        if isinstance(val, list):
+            joined = ", ".join(str(x) for x in val if x is not None and x != "")
+            return joined or None
+        return str(val)
+
+    lines = ["=== Suricata Alert ==="]
+    pairs = [
+        ("Timestamp",        fields.get("timestamp")),
+        ("Signature",        fields.get("signature")),
+        ("Signature ID",     fields.get("signature_id")),
+        ("Category",         fields.get("category")),
+        ("Severity",         fields.get("severity")),
+        ("Protocol",         " / ".join(x for x in [_v(fields.get("proto")), _v(fields.get("app_proto"))] if x) or None),
+        ("Source IP",        _v(fields.get("src_ip"))),
+        ("Source Port",      _v(fields.get("src_port"))),
+        ("Source Country",   " ".join(x for x in [_v(fields.get("src_country")), _v(fields.get("src_city"))] if x) or None),
+        ("Source ASN",       _v(fields.get("src_asn"))),
+        ("Destination IP",   _v(fields.get("dest_ip"))),
+        ("Destination Port", _v(fields.get("dest_port"))),
+        ("Dest Country",     _v(fields.get("dest_country"))),
+        ("Bytes →",          _v(fields.get("bytes_to_h"))),
+        ("Bytes ←",          _v(fields.get("bytes_from_h"))),
+        ("Pkts →",           _v(fields.get("pkts_to"))),
+        ("Pkts ←",           _v(fields.get("pkts_from"))),
+        ("Flow ID",          _v(fields.get("flow_id"))),
+        ("Community ID",     _v(fields.get("community_id"))),
+        ("Hostname",         _v(fields.get("hostname"))),
+        ("Node",             _v(fields.get("node"))),
+        ("Signature Severity", _v(fields.get("sig_severity"))),
+        ("Flowbits",         _v(fields.get("flowbits"))),
+        ("Tags",             _v(fields.get("tags"))),
+        ("Dest Device",      _v(fields.get("dest_device"))),
+        ("HTTP Method",      _v(fields.get("http_method"))),
+        ("HTTP URL",         _v(fields.get("http_url"))),
+        ("HTTP Status",      _v(fields.get("http_status"))),
+        ("HTTP Host",        _v(fields.get("http_hostname"))),
+        ("HTTP User-Agent",  _v(fields.get("http_ua"))),
+    ]
+    for label, val in pairs:
+        if val is not None:
+            lines.append(f"{label}: {val}")
+    return "\n".join(lines)
+
+
 # Turn a raw OpenSearch hit into a SIEM-friendly flat dict the UI can render.
 def summarize_hit(idx: int, hit: dict) -> dict:
     source = hit.get("_source", {}) or {}
@@ -161,6 +220,34 @@ def summarize_hit(idx: int, hit: dict) -> dict:
     hostname = host.get("name") or host.get("hostname")
     node_name = source.get("node")
 
+    # ── HTTP layer (suricata.http) ──────────────────────────────────────────
+    suri_http = suricata.get("http") or {}
+    http_method   = suri_http.get("http_method")
+    http_url      = suri_http.get("url")
+    http_status   = suri_http.get("status")
+    http_hostname = suri_http.get("hostname")
+    http_ua       = suri_http.get("http_user_agent")
+    http_ct       = suri_http.get("http_content_type")
+
+    # ── Extra alert metadata ────────────────────────────────────────────────
+    alert_meta = suricata_alert.get("metadata") or {}
+    sig_severity_list = alert_meta.get("signature_severity") or []
+    sig_severity = sig_severity_list[0] if sig_severity_list else None
+
+    suri_meta = suricata.get("metadata") or {}
+    flowbits_raw = suri_meta.get("flowbits") or []
+    flowbits = ", ".join(str(f) for f in flowbits_raw) if flowbits_raw else None
+
+    # ── Tags ───────────────────────────────────────────────────────────────
+    tags_raw = source.get("tags") or []
+    tags = ", ".join(str(t) for t in tags_raw) if tags_raw else None
+
+    # ── Destination device ─────────────────────────────────────────────────
+    dest_device_raw = _deep(source, "destination", "device", "name") or []
+    dest_device = dest_device_raw[0] if isinstance(dest_device_raw, list) and dest_device_raw else (
+        dest_device_raw if isinstance(dest_device_raw, str) else None
+    )
+
     discover_url = ""
     if doc_id and doc_index:
         discover_url = soc.build_opensearch_discover_url(doc_id, doc_index)
@@ -203,8 +290,35 @@ def summarize_hit(idx: int, hit: dict) -> dict:
         "community_id": community_id,
         "hostname": hostname,
         "node": node_name,
+        "http_method":   http_method,
+        "http_url":      http_url,
+        "http_status":   http_status,
+        "http_hostname": http_hostname,
+        "http_ua":       http_ua,
+        "http_ct":       http_ct,
+        "sig_severity":  sig_severity,
+        "flowbits":      flowbits,
+        "tags":          tags,
+        "dest_device":   dest_device,
         "discover_url": discover_url,
-        "message": source.get("message", ""),
+        "message": _build_alert_message(source, {
+            "timestamp": ts, "signature": signature, "signature_id": signature_id,
+            "category": category, "severity": severity, "sig_severity": sig_severity,
+            "src_ip": src_ip, "src_port": src_port,
+            "src_country": src_country, "src_city": src_city, "src_asn": src_asn,
+            "dest_ip": dest_ip, "dest_port": dest_port, "dest_country": dest_country,
+            "dest_device": dest_device,
+            "proto": proto, "app_proto": app_proto,
+            "pkts_to": pkts_to, "pkts_from": pkts_from,
+            "bytes_to_h": _bytes_human(bytes_to) if bytes_to is not None else None,
+            "bytes_from_h": _bytes_human(bytes_from) if bytes_from is not None else None,
+            "flow_id": flow_id, "community_id": community_id,
+            "hostname": hostname, "node": node_name,
+            "http_method": http_method, "http_url": http_url,
+            "http_status": http_status, "http_hostname": http_hostname,
+            "http_ua": http_ua,
+            "flowbits": flowbits, "tags": tags,
+        }),
     }
 
 
@@ -256,21 +370,21 @@ def api_config():
         ],
         "example_queries": [
             {"query": 'event.kind:"alert"',
-             "description": "All alerts (ECS field — works with Malcolm / Arkime)"},
-            {"query": 'event.kind:"alert" AND suricata.eve.alert.severity:[1 TO 2]',
-             "description": "High / critical severity alerts only"},
+             "description": "All Suricata alerts (ECS field — works with Malcolm / Arkime)"},
+            {"query": 'suricata.alert.severity:[1 TO 2]',
+             "description": "High / critical severity alerts (sev 1 or 2)"},
+            {"query": 'suricata.alert.severity:1',
+             "description": "Critical severity only (sev 1 — highest priority)"},
             {"query": 'rule.name:ET* AND event.kind:"alert"',
              "description": "Emerging Threats rule matches"},
             {"query": 'rule.name:(*MALWARE* OR *TROJAN*) AND event.kind:"alert"',
              "description": "Malware / Trojan related alerts"},
-            {"query": 'source.ip:"192.168.1.100" AND event.kind:"alert"',
-             "description": "Alerts from a specific source IP"},
-            {"query": 'destination.ip:"10.0.0.5" AND suricata.eve.alert.severity:1',
-             "description": "Severity 1 alerts targeting a specific destination"},
             {"query": 'rule.name:(*C2* OR *BOTNET* OR *EXPLOIT*)',
              "description": "C2, botnet, or exploit activity"},
-            {"query": 'network.application:"dns" AND destination.ip:*',
-             "description": "DNS traffic to external destinations"},
+            {"query": 'event.kind:"alert" AND _exists_:source.ip AND NOT source.ip:[10.0.0.0 TO 10.255.255.255] AND NOT source.ip:[172.16.0.0 TO 172.31.255.255] AND NOT source.ip:[192.168.0.0 TO 192.168.255.255]',
+             "description": "Alerts with external (non-RFC-1918) source IPs only"},
+            {"query": 'event.kind:"alert" AND network.application:"dns"',
+             "description": "DNS-related alerts"},
         ],
     })
 

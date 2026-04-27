@@ -38,6 +38,10 @@
         <button class="nav-item" data-tab="tickets">
           <span class="nav-icon">🎫</span><span>Tickets</span>
         </button>
+        <button class="nav-item" data-tab="submitted">
+          <span class="nav-icon">📋</span><span>My Tickets</span>
+          <span class="badge" id="badge-submitted" hidden>0</span>
+        </button>
         <button class="nav-item" data-tab="manual">
           <span class="nav-icon">📘</span><span>Manual</span>
         </button>
@@ -193,6 +197,17 @@
         </div>
       </section>
 
+      <!-- ░░ MY TICKETS TAB ░░ -->
+      <section class="tab" data-tab="submitted">
+        <div id="submitted-panel">
+          <div class="empty">
+            <div class="empty-icon">📋</div>
+            <div class="empty-title">No tickets submitted yet</div>
+            <div class="muted">Submitted MantisBT tickets will appear here across sessions.</div>
+          </div>
+        </div>
+      </section>
+
       <!-- ░░ MANUAL TAB ░░ -->
       <section class="tab" data-tab="manual">
         <article class="card prose">
@@ -238,14 +253,19 @@
             </ul>
 
             <h3>5. Query tips (Lucene)</h3>
+            <p class="muted"><b>IP field note:</b> <code>source.ip</code> is not stored as a standard <code>ip</code> type in this index, so CIDR notation (<code>10.0.0.0/8</code>) and wildcards (<code>10.*</code>) do <b>not</b> work. Use <b>bracket range syntax</b> instead: <code>source.ip:[10.0.0.0 TO 10.255.255.255]</code>. The app converts IP wildcards automatically.</p>
+            <p class="muted"><b>Severity field:</b> The correct field is <code>suricata.alert.severity</code> — not <code>suricata.eve.alert.severity</code>.</p>
             <table class="manual-table">
               <thead><tr><th>Query</th><th>What it finds</th></tr></thead>
               <tbody>
-                <tr><td><code>event.kind:"alert"</code></td><td>All alerts</td></tr>
-                <tr><td><code>suricata.eve.alert.severity:[1 TO 2]</code></td><td>Only high/critical alerts</td></tr>
-                <tr><td><code>rule.name:ET*</code></td><td>Emerging Threats matches</td></tr>
+                <tr><td><code>event.kind:"alert"</code></td><td>All Suricata alerts</td></tr>
+                <tr><td><code>suricata.alert.severity:[1 TO 2]</code></td><td>High / critical alerts (sev 1–2)</td></tr>
+                <tr><td><code>suricata.alert.severity:1</code></td><td>Critical only (sev 1, highest)</td></tr>
+                <tr><td><code>rule.name:ET* AND event.kind:"alert"</code></td><td>Emerging Threats matches</td></tr>
                 <tr><td><code>rule.name:(*C2* OR *BOTNET* OR *EXPLOIT*)</code></td><td>C2, botnet or exploit activity</td></tr>
-                <tr><td><code>source.ip:"1.2.3.4"</code></td><td>Alerts from a specific IP</td></tr>
+                <tr><td><code>event.kind:"alert" AND _exists_:source.ip AND NOT source.ip:[10.0.0.0 TO 10.255.255.255] AND NOT source.ip:[172.16.0.0 TO 172.31.255.255] AND NOT source.ip:[192.168.0.0 TO 192.168.255.255]</code></td><td>External source IPs only (exclude RFC 1918)</td></tr>
+                <tr><td><code>source.ip:"1.2.3.4"</code></td><td>Exact source IP match</td></tr>
+                <tr><td><code>event.kind:"alert" AND network.application:"dns"</code></td><td>DNS-related alerts</td></tr>
               </tbody>
             </table>
 
@@ -254,7 +274,7 @@
               <li><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> — run the current query</li>
               <li><kbd>/</kbd> — jump to the alerts filter</li>
               <li><kbd>T</kbd> — toggle light/dark theme</li>
-              <li><kbd>1</kbd>–<kbd>6</kbd> — switch tabs</li>
+              <li><kbd>1</kbd>–<kbd>7</kbd> — switch tabs (Search, Alerts, IP Enrichment, AI Analysis, Tickets, My Tickets, Manual)</li>
             </ul>
 
             <h3>7. Troubleshooting</h3>

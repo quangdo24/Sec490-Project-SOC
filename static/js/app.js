@@ -16,6 +16,20 @@ const state = {
   pendingTicket: null,   // ticket currently being drafted
 };
 
+// ── Ticket persistence ───────────────────────────────────────
+const TICKETS_STORAGE_KEY = "soc-submitted-tickets";
+
+function saveTickets() {
+  try { localStorage.setItem(TICKETS_STORAGE_KEY, JSON.stringify(state.tickets)); } catch (_) {}
+}
+
+function loadTickets() {
+  try {
+    const raw = localStorage.getItem(TICKETS_STORAGE_KEY);
+    if (raw) state.tickets = JSON.parse(raw);
+  } catch (_) {}
+}
+
 // ── DOM helpers ─────────────────────────────────────────────
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -80,6 +94,7 @@ const TAB_TITLES = {
   enrichment: ["IP Enrichment",    "AbuseIPDB reputation for public source IPs"],
   analysis:   ["AI Analysis",      "Gemini-generated incident reports"],
   tickets:    ["Tickets",          "Draft & submit MantisBT issues"],
+  submitted:  ["My Tickets",       "Previously submitted MantisBT tickets"],
   manual:     ["User Manual",      "How to use every feature of SOC Sentinel"],
 };
 
@@ -334,25 +349,35 @@ function alertCard(h) {
   const body = el("div", { class: "alert-body" });
 
   const fields = [
-    ["Timestamp",      h.timestamp],
-    ["Signature ID",   h.signature_id],
-    ["Category",       h.category],
-    ["Protocol",       [h.proto, h.app_proto].filter(Boolean).join(" / ") || null],
-    ["Source IP:port", h.src_ip ? `${h.src_ip}:${h.src_port ?? "?"}` : null],
-    ["Source GeoIP",   [h.src_country, h.src_city].filter(Boolean).join(", ") || null],
-    ["Source ASN",     h.src_asn],
-    ["Destination",    h.dest_ip ? `${h.dest_ip}:${h.dest_port ?? "?"}` : null],
-    ["Dest GeoIP",     h.dest_country],
-    ["Packets →",      h.pkts_to],
-    ["Packets ←",      h.pkts_from],
-    ["Bytes →",        h.bytes_to_h],
-    ["Bytes ←",        h.bytes_from_h],
-    ["Flow ID",        h.flow_id],
-    ["Community ID",   h.community_id],
-    ["Host",           h.hostname],
-    ["Node",           h.node],
-    ["Index",          h.doc_index],
-    ["Document ID",    h.doc_id],
+    ["Timestamp",          h.timestamp],
+    ["Signature ID",       h.signature_id],
+    ["Sig. Severity",      h.sig_severity],
+    ["Category",           h.category],
+    ["Flowbits",           h.flowbits],
+    ["Tags",               h.tags],
+    ["Protocol",           [h.proto, h.app_proto].filter(Boolean).join(" / ") || null],
+    ["Source IP:port",     h.src_ip ? `${h.src_ip}:${h.src_port ?? "?"}` : null],
+    ["Source GeoIP",       [h.src_country, h.src_city].filter(Boolean).join(", ") || null],
+    ["Source ASN",         h.src_asn],
+    ["Destination",        h.dest_ip ? `${h.dest_ip}:${h.dest_port ?? "?"}` : null],
+    ["Dest GeoIP",         h.dest_country],
+    ["Dest Device",        h.dest_device],
+    ["HTTP Method",        h.http_method],
+    ["HTTP URL",           h.http_url],
+    ["HTTP Status",        h.http_status],
+    ["HTTP Host",          h.http_hostname],
+    ["HTTP User-Agent",    h.http_ua],
+    ["HTTP Content-Type",  h.http_ct],
+    ["Packets →",          h.pkts_to],
+    ["Packets ←",          h.pkts_from],
+    ["Bytes →",            h.bytes_to_h],
+    ["Bytes ←",            h.bytes_from_h],
+    ["Flow ID",            h.flow_id],
+    ["Community ID",       h.community_id],
+    ["Host",               h.hostname],
+    ["Node",               h.node],
+    ["Index",              h.doc_index],
+    ["Document ID",        h.doc_id],
   ].filter(([, v]) => v !== null && v !== undefined && v !== "");
 
   const grid = el("div", { class: "siem-grid" });
@@ -674,11 +699,19 @@ async function draftMantisTicket(a) {
     suggested = res.suggested;
   } catch (_) { /* non-fatal */ }
 
+  const discoverRef = a.hit.discover_url
+    ? a.hit.discover_url
+    : `[No Discover URL configured — document reference: index=${a.hit.doc_index || "?"}, id=${a.hit.doc_id || "?"}]`;
+
+  const addlParts = [];
+  if (a.analysis.additional_information) addlParts.push(a.analysis.additional_information);
+  if (a.hit.doc_id) addlParts.push(`OpenSearch document: index=${a.hit.doc_index || "?"} | id=${a.hit.doc_id}`);
+
   state.pendingTicket = {
     summary: a.analysis.summary || "Incident Report",
     description: a.description_text,
-    steps_to_reproduce: a.hit.discover_url || "",
-    additional_information: a.analysis.additional_information || "",
+    steps_to_reproduce: discoverRef,
+    additional_information: addlParts.join("\n\n"),
     project_id: suggested ? suggested.id : (state.config.mantis_projects[0]?.id || 1),
     project_name: suggested ? suggested.name : (state.config.mantis_projects[0]?.name || ""),
     view_state: "private",
@@ -776,9 +809,11 @@ function ticketDraftCard(t) {
           const payload = { ...t };
           delete payload._source_analysis;
           const res = await api("/api/mantis/submit", { method: "POST", body: payload });
-          state.tickets.unshift({ ticket: t, result: res });
+          state.tickets.unshift({ ticket: t, result: res, submittedAt: new Date().toISOString() });
+          saveTickets();
           state.pendingTicket = null;
           renderTickets();
+          renderSubmittedTickets();
           toast(`Ticket submitted — #${res.issue_id}`, { type: "success" });
         } catch (err) {
           toast(err.message, { type: "error", title: "Mantis failed" });
@@ -813,6 +848,122 @@ function ticketSubmittedCard(t) {
   );
 }
 
+// ── My Tickets tab ──────────────────────────────────────────
+function renderSubmittedTickets() {
+  const root = $("#submitted-panel");
+  root.innerHTML = "";
+
+  const badge = $("#badge-submitted");
+  badge.hidden = state.tickets.length === 0;
+  badge.textContent = state.tickets.length;
+
+  if (!state.tickets.length) {
+    root.appendChild(el("div", { class: "empty" },
+      el("div", { class: "empty-icon" }, "📋"),
+      el("div", { class: "empty-title" }, "No tickets submitted yet"),
+      el("div", { class: "muted" }, "Submitted MantisBT tickets will appear here across sessions."),
+    ));
+    return;
+  }
+
+  const toolbar = el("div", { class: "toolbar" },
+    el("div", { class: "toolbar-left" },
+      el("span", { class: "chip" }, `${state.tickets.length} ticket${state.tickets.length === 1 ? "" : "s"}`),
+    ),
+    el("div", { class: "toolbar-right" },
+      el("button", {
+        class: "btn btn-ghost btn-sm",
+        onclick: () => {
+          if (!confirm("Clear all submitted ticket history? This cannot be undone.")) return;
+          state.tickets = [];
+          saveTickets();
+          renderSubmittedTickets();
+        },
+      }, "🗑 Clear history"),
+    ),
+  );
+  root.appendChild(toolbar);
+
+  for (const t of state.tickets) root.appendChild(submittedTicketDetailCard(t));
+}
+
+function submittedTicketDetailCard(t) {
+  const id = t.result?.issue_id;
+  const mantisUrl = t.result?.ticket_url;
+  const discoverUrl = t.ticket?.steps_to_reproduce;
+  const submittedAt = t.submittedAt ? new Date(t.submittedAt).toLocaleString() : null;
+
+  const card = el("article", { class: "analysis-card" });
+
+  card.appendChild(el("header", {},
+    el("h3", {},
+      mantisUrl
+        ? el("a", { href: mantisUrl, target: "_blank", rel: "noopener", style: "color:inherit;text-decoration:none;" },
+            `Ticket #${id ?? "?"} — `, el("span", { class: "sig" }, t.ticket.summary))
+        : `Ticket #${id ?? "?"} — ${t.ticket.summary}`,
+    ),
+    el("div", { class: "muted" }, [
+      `Project: ${t.ticket.project_name || t.ticket.project_id}`,
+      t.ticket.view_state === "private" ? " • 🔒 Private" : " • 🌐 Public",
+      submittedAt ? ` • Submitted ${submittedAt}` : "",
+    ].join("")),
+  ));
+
+  const sec = (title, body) => el("section", { class: "analysis-section" },
+    el("h4", {}, title),
+    body,
+  );
+
+  const descDetails = el("details", {},
+    el("summary", { style: "cursor:pointer;color:var(--accent);font-size:13px;user-select:none;" }, "Show description"),
+    el("pre", {
+      class: "mono-block",
+      style: "white-space:pre-wrap;font-size:12px;margin-top:8px;max-height:320px;overflow-y:auto;",
+    }, t.ticket.description || ""),
+  );
+  card.appendChild(sec("Description", descDetails));
+
+  if (t.ticket.additional_information) {
+    card.appendChild(sec("Additional information", el("p", {}, t.ticket.additional_information)));
+  }
+
+  const actions = el("div", {
+    class: "alert-actions",
+    style: "padding:14px 20px;border-top:1px solid var(--border);",
+  });
+
+  if (mantisUrl) {
+    actions.appendChild(el("a", {
+      class: "btn btn-secondary btn-sm",
+      href: mantisUrl,
+      target: "_blank",
+      rel: "noopener",
+    }, "↗ Open in Mantis"));
+  }
+
+  if (discoverUrl) {
+    actions.appendChild(el("a", {
+      class: "btn btn-ghost btn-sm",
+      href: discoverUrl,
+      target: "_blank",
+      rel: "noopener",
+    }, "↗ Open in OpenSearch"));
+  }
+
+  actions.appendChild(el("button", {
+    class: "btn btn-ghost btn-sm",
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(t, null, 2));
+        toast("Ticket JSON copied", { type: "success", timeout: 1500 });
+      } catch { toast("Copy failed", { type: "error" }); }
+    },
+  }, "📋 Copy JSON"));
+
+  card.appendChild(actions);
+  return card;
+}
+
 // ── Modal ───────────────────────────────────────────────────
 function closeModal() { $("#modal-root").hidden = true; }
 function initModal() {
@@ -843,8 +994,8 @@ function initShortcuts() {
       $("#alerts-filter").focus();
     } else if (e.key.toLowerCase() === "t") {
       $("#theme-toggle").click();
-    } else if (/^[1-6]$/.test(e.key)) {
-      const order = ["query", "alerts", "enrichment", "analysis", "tickets", "manual"];
+    } else if (/^[1-7]$/.test(e.key)) {
+      const order = ["query", "alerts", "enrichment", "analysis", "tickets", "submitted", "manual"];
       switchTab(order[parseInt(e.key, 10) - 1]);
     }
   });
@@ -856,6 +1007,8 @@ function init() {
   initModal();
   initShortcuts();
   initQueryForm();
+  loadTickets();
+  renderSubmittedTickets();
 
   $$(".nav-item").forEach(b => {
     b.addEventListener("click", () => switchTab(b.dataset.tab));

@@ -126,6 +126,67 @@ else:
 OPENSEARCH_DATA_SOURCE_ID = os.getenv("OPENSEARCH_DATA_SOURCE_ID", "").strip()
 
 
+def _ip_cidr_to_range(query: str) -> str:
+    """Convert CIDR notation in a Lucene query to bracket range notation.
+
+    CIDR notation (e.g. ``source.ip:10.0.0.0/8``) does not work through the
+    Dev Tools proxy for this index mapping.  Bracket range queries do work:
+    ``source.ip:[10.0.0.0 TO 10.255.255.255]``.
+
+    Uses Python's ipaddress module so any valid CIDR (including /12, /24, etc.)
+    is converted correctly.
+    """
+    def _replace(m: re.Match) -> str:
+        field = m.group(1)
+        cidr_str = m.group(2)
+        try:
+            net = ipaddress.IPv4Network(cidr_str, strict=False)
+            lo = str(net.network_address)
+            hi = str(net.broadcast_address)
+            return f"{field}[{lo} TO {hi}]"
+        except ValueError:
+            return m.group(0)  # leave unchanged if invalid
+
+    # Match field:A.B.C.D/N  (with or without surrounding quotes)
+    query = re.sub(
+        r'([\w.]+\.ip:)"?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2})"?',
+        _replace,
+        query,
+    )
+    return query
+
+
+def _ip_wildcard_to_range(query: str) -> str:
+    """Convert IP wildcard patterns to Lucene bracket range notation.
+
+    Wildcards like ``source.ip:10.*`` also do not work on this index mapping.
+    Converts ``A.*``, ``A.B.*``, ``A.B.C.*`` to the equivalent inclusive
+    bracket range.  Quoted variants are also handled.
+    """
+    def _replace(m: re.Match) -> str:
+        field = m.group(1)
+        octets = m.group(2).split(".")
+        n = len(octets)
+        if n == 1:
+            lo = f"{octets[0]}.0.0.0"
+            hi = f"{octets[0]}.255.255.255"
+        elif n == 2:
+            lo = f"{octets[0]}.{octets[1]}.0.0"
+            hi = f"{octets[0]}.{octets[1]}.255.255"
+        else:
+            lo = f"{octets[0]}.{octets[1]}.{octets[2]}.0"
+            hi = f"{octets[0]}.{octets[1]}.{octets[2]}.255"
+        return f"{field}[{lo} TO {hi}]"
+
+    # Match unquoted and quoted:  source.ip:10.*  destination.ip:"192.168.*"  etc.
+    query = re.sub(
+        r'([\w.]+\.ip:)"?(\d{1,3}(?:\.\d{1,3}){0,2})\.\*"?',
+        _replace,
+        query,
+    )
+    return query
+
+
 def _normalize_lucene_query(query: str) -> str:
     """Normalize Lucene pasted from the UI (curly quotes, spaces after ':')."""
     query = query.strip()
@@ -139,6 +200,16 @@ def _normalize_lucene_query(query: str) -> str:
     # "field: \"value\"" breaks query_string; Lucene expects field:\"value\" or field:value
     query = re.sub(r":\s+\"", ':"', query)
     query = re.sub(r":\s+'", ":'", query)
+    # CIDR notation (e.g. source.ip:10.0.0.0/8) does not work on this index;
+    # convert to bracket range notation first, then handle wildcards.
+    query = _ip_cidr_to_range(query)
+    query = _ip_wildcard_to_range(query)
+    # A query that starts with NOT (or contains only NOT clauses) returns zero
+    # results in query_string because there is no positive clause to score.
+    # Prepend a match-all wildcard so the NOT can filter against something.
+    stripped = query.lstrip()
+    if re.match(r'^NOT\s', stripped, re.IGNORECASE):
+        query = f"* AND {stripped}"
     return query
 
 
@@ -728,21 +799,43 @@ def _bytes_human(value) -> str:
 
 
 def build_opensearch_discover_url(doc_id: str, index: str) -> str:
-    """Build OpenSearch Dashboards Discover URL for one document, or '' if not configured.
+    """Build an OpenSearch Dashboards Discover URL for one document.
 
-    Set OPENSEARCH_DISCOVER_INDEX_PATTERN_ID (saved object id of the data view). If
-    OPENSEARCH_DASHBOARDS_BASE_URL is unset and transport is dev_tools, the same host
-    as OPENSEARCH_BASE_URL is used for links.
+    If OPENSEARCH_DISCOVER_INDEX_PATTERN_ID is set, builds the direct
+    ``#/doc/{pattern}/{index}?id=`` link (deep-link to a single document).
+
+    Otherwise falls back to a Discover query URL that pre-fills an
+    ``_id:"<doc_id>"`` Lucene search — this works without knowing the
+    saved-object ID of the data view.
+
+    Returns '' only when no base URL can be determined.
     """
     base = OPENSEARCH_DASHBOARDS_BASE_URL or (
         OPENSEARCH_BASE_URL if OPENSEARCH_TRANSPORT == "dev_tools" else ""
     )
-    pattern_id = OPENSEARCH_DISCOVER_INDEX_PATTERN_ID
-    if not (base and pattern_id and doc_id and index):
+    if not (base and doc_id):
         return ""
-    encoded_id = urllib.parse.quote(doc_id, safe="")
-    encoded_index = urllib.parse.quote(index, safe="")
-    return f"{base}/app/discover#/doc/{pattern_id}/{encoded_index}?id={encoded_id}"
+
+    pattern_id = OPENSEARCH_DISCOVER_INDEX_PATTERN_ID
+    if pattern_id and index:
+        # Preferred: direct single-document link
+        encoded_id = urllib.parse.quote(doc_id, safe="")
+        encoded_index = urllib.parse.quote(index, safe="")
+        return f"{base}/app/discover#/doc/{pattern_id}/{encoded_index}?id={encoded_id}"
+
+    # Fallback: Discover query URL — opens with _id search pre-filled.
+    # Uses rison-style fragment so Dashboards parses it automatically.
+    # Expand the time window to 30 days so older docs are visible.
+    safe_id = doc_id.replace("'", "\\'")
+    query = f"_id:\"{safe_id}\""
+    if index:
+        query += f" AND _index:\"{index}\""
+    encoded_query = urllib.parse.quote(query, safe="\"")
+    return (
+        f"{base}/app/discover#/"
+        f"?_a=(query:(language:lucene,query:'{encoded_query}'))"
+        f"&_g=(time:(from:now-30d,to:now))"
+    )
 
 
 def _deep(obj, *keys, default=None):

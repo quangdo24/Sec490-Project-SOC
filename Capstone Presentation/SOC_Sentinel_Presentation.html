@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SOC Sentinel — Capstone Presentation</title>
+<style>
+  :root {
+    --bg:        #070b12;
+    --bg-2:      #0c121d;
+    --panel:     rgba(16, 24, 38, 0.72);
+    --line:      rgba(86, 220, 198, 0.18);
+    --cyan:      #29e7c8;
+    --cyan-dim:  #5bd1e6;
+    --green:     #67ffab;
+    --amber:     #ffcc66;
+    --red:       #ff6b8a;
+    --text:      #e7f0f5;
+    --muted:     #8aa0ac;
+    --mono:      "SFMono-Regular", "JetBrains Mono", "Fira Code", Consolas, "Courier New", monospace;
+    --sans:      "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+
+  /* layered cyber background */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(1200px 700px at 80% -10%, rgba(41,231,200,0.10), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(91,209,230,0.08), transparent 60%),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+    z-index: -2;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(86,220,198,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(86,220,198,0.04) 1px, transparent 1px);
+    background-size: 46px 46px;
+    mask-image: radial-gradient(circle at 50% 40%, black, transparent 85%);
+    z-index: -1;
+  }
+
+  .deck { height: 100%; width: 100%; }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    padding: 6vh 9vw;
+    animation: fade 0.45s ease;
+  }
+  .slide.active { display: flex; }
+
+  @keyframes fade {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* kicker / eyebrow */
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    margin-bottom: 1.1rem;
+    display: flex; align-items: center; gap: 0.7rem;
+  }
+  .kicker::before {
+    content: "";
+    width: 26px; height: 2px;
+    background: var(--cyan);
+    box-shadow: 0 0 12px var(--cyan);
+  }
+
+  h1 {
+    font-size: clamp(2.6rem, 6vw, 5rem);
+    line-height: 1.02;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  h1 .glow { color: var(--cyan); text-shadow: 0 0 28px rgba(41,231,200,0.45); }
+
+  h2 {
+    font-size: clamp(1.8rem, 3.6vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+    margin-bottom: 2.2rem;
+  }
+  h2 .num { color: var(--cyan); font-family: var(--mono); font-size: 0.55em; vertical-align: super; margin-right: 0.5rem; }
+
+  p.lead { font-size: 1.25rem; color: var(--muted); margin-top: 1.4rem; max-width: 60ch; }
+
+  ul.bullets { list-style: none; max-width: 78ch; }
+  ul.bullets li {
+    position: relative;
+    padding-left: 2.1rem;
+    margin-bottom: 1.15rem;
+    font-size: clamp(1.05rem, 1.7vw, 1.4rem);
+    line-height: 1.45;
+    color: var(--text);
+  }
+  ul.bullets li::before {
+    content: "▸";
+    position: absolute; left: 0; top: 0;
+    color: var(--cyan);
+    font-size: 1.05em;
+  }
+  ul.bullets li b { color: #fff; }
+  ul.bullets li .dim { color: var(--muted); }
+  ul.bullets li.sub {
+    padding-left: 3.6rem;
+    font-size: clamp(0.95rem, 1.4vw, 1.18rem);
+    color: var(--muted);
+    margin-bottom: 0.7rem;
+  }
+  ul.bullets li.sub::before { content: "└"; left: 2rem; color: var(--cyan-dim); opacity: 0.7; }
+
+  .accent-red   { color: var(--red)   !important; }
+  .accent-amber { color: var(--amber) !important; }
+  .accent-green { color: var(--green) !important; }
+
+  .meta {
+    margin-top: 3rem;
+    font-family: var(--mono);
+    color: var(--muted);
+    font-size: 0.95rem;
+    display: flex; flex-wrap: wrap; gap: 1.6rem;
+  }
+  .meta b { color: var(--text); font-weight: 600; }
+
+  .tagchips { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 2rem; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    padding: 0.4rem 0.85rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--cyan-dim);
+    background: rgba(41,231,200,0.05);
+  }
+
+  /* two-column layout */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 3vw; align-items: start; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.5rem 1.6rem;
+    backdrop-filter: blur(6px);
+  }
+  .panel h3 {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    margin-bottom: 1rem;
+  }
+
+  /* pipeline flow (slide 4) */
+  .pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin-bottom: 1.8rem; }
+  .stage {
+    flex: 1 1 0;
+    min-width: 140px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1.1rem 1rem;
+    position: relative;
+    text-align: center;
+  }
+  .stage .ico { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .stage .t { font-weight: 700; font-size: 0.98rem; margin-bottom: 0.3rem; }
+  .stage .d { font-size: 0.78rem; color: var(--muted); font-family: var(--mono); line-height: 1.35; }
+  .arrow {
+    align-self: center;
+    color: var(--cyan);
+    font-size: 1.5rem;
+    padding: 0 0.55rem;
+    flex: 0 0 auto;
+    text-shadow: 0 0 10px rgba(41,231,200,0.5);
+  }
+  .stage.human { border-color: rgba(255,204,102,0.4); }
+  .stage.human .ico, .stage.human .t { color: var(--amber); }
+
+  .callout {
+    margin-top: 0.5rem;
+    border-left: 3px solid var(--amber);
+    background: rgba(255,204,102,0.07);
+    padding: 1rem 1.3rem;
+    border-radius: 0 10px 10px 0;
+    font-size: 1.05rem;
+    color: var(--text);
+    max-width: 80ch;
+  }
+  .callout b { color: var(--amber); }
+
+  code.k { font-family: var(--mono); color: var(--green); background: rgba(103,255,171,0.08); padding: 0.05em 0.4em; border-radius: 5px; font-size: 0.92em; }
+
+  /* demo video frame (slide 5) */
+  .videowrap {
+    margin-top: 0.4rem;
+    width: min(72vw, 1000px);
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+    position: relative;
+    background: #04070c;
+    box-shadow: 0 0 0 1px rgba(41,231,200,0.08), 0 24px 70px rgba(0,0,0,0.55), 0 0 60px rgba(41,231,200,0.10);
+  }
+  .videowrap video,
+  .videowrap iframe { width: 100%; height: 100%; display: block; border: 0; object-fit: cover; }
+  .videowrap .placeholder {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1rem; text-align: center; padding: 2rem;
+    background:
+      radial-gradient(600px 300px at 50% 30%, rgba(41,231,200,0.10), transparent 70%),
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.015) 0 12px, transparent 12px 24px);
+  }
+  .videowrap .play {
+    width: 84px; height: 84px; border-radius: 50%;
+    border: 2px solid var(--cyan);
+    display: grid; place-items: center;
+    color: var(--cyan); font-size: 1.8rem;
+    box-shadow: 0 0 28px rgba(41,231,200,0.4);
+    background: rgba(41,231,200,0.06);
+  }
+  .videowrap .ph-title { font-weight: 700; font-size: 1.2rem; }
+  .videowrap .ph-sub { font-family: var(--mono); font-size: 0.82rem; color: var(--muted); line-height: 1.5; max-width: 52ch; }
+  .videowrap .ph-sub code { color: var(--green); }
+
+  /* chrome: progress + counter + nav */
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 3px; background: rgba(255,255,255,0.05); z-index: 10;
+  }
+  .topbar .fill { height: 100%; width: 20%; background: linear-gradient(90deg, var(--cyan), var(--green)); box-shadow: 0 0 12px var(--cyan); transition: width 0.4s ease; }
+
+  .brandtag {
+    position: fixed; top: 1.3rem; left: 9vw;
+    font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.2em;
+    color: var(--muted); text-transform: uppercase; z-index: 10;
+  }
+  .brandtag .dot { color: var(--green); }
+
+  .counter {
+    position: fixed; bottom: 1.4rem; right: 9vw;
+    font-family: var(--mono); font-size: 0.85rem; color: var(--muted); z-index: 10;
+  }
+  .counter b { color: var(--cyan); }
+
+  .nav {
+    position: fixed; bottom: 1.1rem; left: 9vw;
+    display: flex; gap: 0.5rem; z-index: 10;
+  }
+  .nav button {
+    font-family: var(--mono);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--text);
+    width: 38px; height: 34px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.15s ease;
+  }
+  .nav button:hover { border-color: var(--cyan); color: var(--cyan); }
+
+  .hint {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 0.72rem; color: rgba(138,160,172,0.5);
+    z-index: 10; letter-spacing: 0.1em;
+  }
+
+  @media (max-width: 760px) {
+    .cols { grid-template-columns: 1fr; }
+    .pipeline { flex-direction: column; }
+    .arrow { transform: rotate(90deg); padding: 0.3rem 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar"><div class="fill" id="fill"></div></div>
+<div class="brandtag">SOC&nbsp;Sentinel <span class="dot">●</span> SEC490 Capstone</div>
+
+<div class="deck" id="deck">
+
+  <!-- SLIDE 1 — TITLE -->
+  <section class="slide active">
+    <div class="kicker">Capstone Final Project</div>
+    <h1>SOC <span class="glow">Sentinel</span><br/>An AI-Assisted SOC<br/>Analyst Workflow</h1>
+    <p class="lead">Automating Suricata alert triage, threat research, and ticket creation.</p>
+    <div class="tagchips">
+      <span class="chip">OpenSearch</span>
+      <span class="chip">Suricata IDS</span>
+      <span class="chip">AbuseIPDB</span>
+      <span class="chip">Gemini AI</span>
+      <span class="chip">MantisBT</span>
+      <span class="chip">Python</span>
+    </div>
+    <div class="meta">
+      <span><b>Course:</b> SEC490 — Capstone</span>
+      <span><b>Presenter:</b> Quang Do</span>
+      <span><b>Format:</b> CLI + Web GUI</span>
+    </div>
+  </section>
+
+  <!-- SLIDE 2 — THE PROBLEM -->
+  <section class="slide">
+    <h2><span class="num">01</span>The Problem — Why This Project</h2>
+    <ul class="bullets">
+      <li>SOC analysts must manually sift through <b>thousands of Suricata IDS logs</b> in OpenSearch just to find one alert worth investigating.</li>
+      <li>Each interesting log then has to be <b>researched by hand</b> — looking up source IPs, reputation, and geolocation across separate tools.</li>
+      <li>The analyst has to <b>decide if it's a real threat</b> — slow, judgment-heavy, and easy to get wrong under volume.</li>
+      <li>Finally, a <b>MantisBT ticket is drafted manually</b>, re-typing the same fields every time.</li>
+      <li class="accent-red"><b>Result:</b> repetitive, time-consuming, error-prone work with constant context-switching between OpenSearch, AbuseIPDB, and the ticketing system.</li>
+    </ul>
+    <p class="lead">One interesting log → research → threat decision → ticket. Today that's almost entirely manual.</p>
+  </section>
+
+  <!-- SLIDE 3 — GOALS & INTENT -->
+  <section class="slide">
+    <h2><span class="num">02</span>Goal &amp; Intent</h2>
+    <ul class="bullets">
+      <li><b class="accent-green">Automate the repetitive parts</b> of the triage pipeline — searching, enriching, and summarizing alerts.</li>
+      <li><b class="accent-green">Implement AI as a SOC analyst assistant</b> — Gemini reads the raw alert and produces a plain-English incident report.</li>
+      <li><b class="accent-green">Automate ticket creation</b> — the analysis is turned into a structured MantisBT ticket with one action.</li>
+      <li><b class="accent-amber">Keep a human in the loop</b> — the analyst verifies that the information is accurate before anything is filed.</li>
+      <li><b class="accent-amber">Stay a learning tool, not a black box</b> — as a student, I stay involved so I actually understand what's happening at each step.</li>
+    </ul>
+    <p class="lead">Speed up the busywork; keep the human responsible for the decision.</p>
+  </section>
+
+  <!-- SLIDE 4 — HOW IT WORKS (MID LEVEL) -->
+  <section class="slide">
+    <h2><span class="num">03</span>How It Works — The Pipeline</h2>
+    <div class="pipeline">
+      <div class="stage">
+        <div class="ico">🔍</div>
+        <div class="t">Search</div>
+        <div class="d">OpenSearch query for Suricata alerts</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage">
+        <div class="ico">🌐</div>
+        <div class="t">Enrich</div>
+        <div class="d">AbuseIPDB risk score + GeoIP</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage">
+        <div class="ico">🤖</div>
+        <div class="t">Analyze</div>
+        <div class="d">Gemini AI incident report</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage human">
+        <div class="ico">🧑‍💻</div>
+        <div class="t">Review</div>
+        <div class="d">Human verifies + redacts</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage">
+        <div class="ico">🎫</div>
+        <div class="t">Ticket</div>
+        <div class="d">MantisBT auto-drafted</div>
+      </div>
+    </div>
+    <ul class="bullets">
+      <li>One tool ties together five steps that used to live in five different places.</li>
+      <li>Color-coded results show <b>severity, source/destination IPs, protocol, and location</b> at a glance.</li>
+      <li>Same core logic powers both a <b>terminal CLI</b> and a <b>SIEM-style web GUI</b> (Flask).</li>
+    </ul>
+    <div class="callout"><b>Human-in-the-loop checkpoint:</b> nothing is sent to AI or filed as a ticket until I review it.</div>
+  </section>
+
+  <!-- SLIDE 5 — UNDER THE HOOD (LOW LEVEL) -->
+  <section class="slide">
+    <h2><span class="num">04</span>Under the Hood</h2>
+    <div class="cols">
+      <div class="panel">
+        <h3>// Data &amp; Enrichment</h3>
+        <ul class="bullets">
+          <li>Python queries OpenSearch using <code class="k">Lucene</code> via the Dashboards Dev Tools proxy.</li>
+          <li>CIDR / wildcard IPs auto-convert to range syntax before sending.</li>
+          <li>Public source IPs looked up in <b>AbuseIPDB</b> → confidence/risk score.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>// AI &amp; Ticketing</h3>
+        <ul class="bullets">
+          <li>Gemini gets a <b>structured prompt</b> → returns strict JSON: summary, what/why/result, recommended action.</li>
+          <li><b class="accent-amber">In-page redaction</b> step before any data leaves for the AI.</li>
+          <li>Auto-detects the <b>MantisBT project</b> from the host, then drafts &amp; submits via API.</li>
+        </ul>
+      </div>
+    </div>
+    <ul class="bullets" style="margin-top:1.6rem;">
+      <li><b>Security built in:</b> credentials are git-ignored, and a <code class="k">Bandit</code> static scan runs in CI on every push.</li>
+      <li class="accent-green"><b>Takeaway:</b> the machine does the heavy lifting; I stay in control, verify accuracy, and learn the tradecraft along the way.</li>
+    </ul>
+  </section>
+
+  <!-- SLIDE 6 — LIVE DEMO -->
+  <section class="slide" style="align-items:center; text-align:center;">
+    <div class="kicker" style="justify-content:center;">See It In Action</div>
+    <h2 style="margin-bottom:1.4rem;"><span class="num">05</span>Live Demo</h2>
+    <div class="videowrap" id="videowrap">
+      <iframe src="https://www.youtube.com/embed/aa9aTHRhbGc?si=HuaSXDwFaNudORbZ" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
+    <p class="lead" style="margin-top:1.4rem; text-align:center;">Watch the full workflow: search&nbsp;→&nbsp;enrich&nbsp;→&nbsp;AI&nbsp;analysis&nbsp;→&nbsp;human&nbsp;review&nbsp;→&nbsp;ticket.</p>
+    <p style="margin-top:.6rem; text-align:center; font-size:.95rem; opacity:.85;">
+      Video not loading? <a href="https://www.youtube.com/watch?v=aa9aTHRhbGc" target="_blank" rel="noopener" style="color:#29e7c8; font-weight:600; text-decoration:none;">Watch on YouTube&nbsp;↗</a>
+    </p>
+  </section>
+
+</div>
+
+<div class="counter"><b id="cur">01</b> / <span id="total">05</span></div>
+<div class="nav">
+  <button id="prev" aria-label="Previous">‹</button>
+  <button id="next" aria-label="Next">›</button>
+</div>
+<div class="hint">← / → or SPACE to navigate · F for fullscreen</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const total = slides.length;
+  let i = 0;
+  const fill = document.getElementById('fill');
+  const cur = document.getElementById('cur');
+  document.getElementById('total').textContent = String(total).padStart(2,'0');
+
+  function show(n){
+    i = Math.max(0, Math.min(total-1, n));
+    slides.forEach((s,idx)=> s.classList.toggle('active', idx===i));
+    fill.style.width = ((i+1)/total*100) + '%';
+    cur.textContent = String(i+1).padStart(2,'0');
+  }
+  function next(){ show(i+1); }
+  function prev(){ show(i-1); }
+
+  document.getElementById('next').onclick = next;
+  document.getElementById('prev').onclick = prev;
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(total-1);
+    else if (e.key.toLowerCase() === 'f') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+
+  show(0);
+</script>
+</body>
+</html>

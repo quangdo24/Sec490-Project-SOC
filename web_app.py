@@ -496,7 +496,14 @@ def api_enrich():
 
 @app.post("/api/analyze")
 def api_analyze():
-    """Run a message through Gemini and return the structured analysis."""
+    """Run a message through Gemini and return the structured analysis.
+
+    PII (IP addresses, MAC addresses) is automatically redacted from the
+    message before it is sent to the Gemini API.  The response includes a
+    ``pii_mapping`` dict  ({placeholder: original_value})  so the browser UI
+    can prompt the analyst to manually fill in the real values before the
+    ticket is submitted to Mantis.
+    """
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
     if not message:
@@ -508,9 +515,12 @@ def api_analyze():
     if err:
         return _json_error(err, 400, missing_secret="gemini")
 
+    # Redact PII — real IPs/MACs must not leave this server
+    redacted_message, pii_mapping = soc.redact_pii(message)
+
     try:
         with _quiet():
-            analysis = soc.analyze_with_gemini(message, secrets["api_key"])
+            analysis = soc.analyze_with_gemini(redacted_message, secrets["api_key"])
     except Exception as exc:
         return _json_error(f"Gemini analysis failed: {exc}", 502)
 
@@ -518,6 +528,8 @@ def api_analyze():
         "ok": True,
         "analysis": analysis,
         "description_text": soc.format_description_text(analysis),
+        "pii_mapping": pii_mapping,
+        "redacted_message": redacted_message,
     })
 
 

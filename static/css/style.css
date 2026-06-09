@@ -768,6 +768,96 @@ pre.mono-block {
   white-space: pre;
 }
 
+/* ── Privacy / analyst notices ───────────────────────────── */
+
+/* Shown in the analyze modal before sending to Gemini */
+.privacy-notice {
+  background: rgba(245, 166, 35, 0.1);
+  border: 1px solid rgba(245, 166, 35, 0.45);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.privacy-notice-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--warning);
+  margin-bottom: 6px;
+  letter-spacing: .02em;
+}
+.privacy-notice p { margin: 4px 0 0; color: var(--text); }
+.privacy-notice code {
+  background: rgba(255,255,255,.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--ff-mono);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+/* Shown in the ticket draft when analyst must fill in real values */
+.analyst-section {
+  background: rgba(46, 204, 113, 0.06);
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 4px;
+}
+.analyst-notice {
+  background: rgba(46, 204, 113, 0.1);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  border-left: 4px solid var(--success);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.analyst-notice-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--success);
+  margin-bottom: 6px;
+  letter-spacing: .05em;
+}
+.analyst-notice p { margin: 4px 0 0; color: var(--text); }
+.analyst-notice-emphasis {
+  font-weight: 600;
+  color: var(--success) !important;
+  margin-top: 8px !important;
+}
+
+/* Grid of placeholder → input rows */
+.pii-fill-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pii-fill-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.pii-placeholder {
+  font-family: var(--ff-mono);
+  font-size: 13px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 4px 8px;
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pii-fill-input {
+  font-family: var(--ff-mono);
+  font-size: 13px;
+}
+
 /* ── Small screens ────────────────────────────────────────── */
 @media (max-width: 820px) {
   .app { grid-template-columns: 1fr; }

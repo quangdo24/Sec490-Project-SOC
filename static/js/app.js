@@ -535,6 +535,58 @@ async function enrichAll() {
   await enrichIps(ips, { focus: true });
 }
 
+// ── Client-side PII redaction ────────────────────────────────
+// Mirrors the Python redact_pii() in SOC_Program.py.
+// The server also redacts, but we pre-redact here so the preview
+// textarea never shows identifying info to the analyst.
+function redactPii(text) {
+  const mapping = {};   // placeholder → original
+  const seen    = {};   // original → placeholder (de-duplicate)
+  const counters = { IP: 0, IPv6: 0, MAC: 0, HOSTNAME: 0 };
+
+  function makeReplacer(prefix) {
+    return (match) => {
+      if (Object.prototype.hasOwnProperty.call(seen, match)) return seen[match];
+      counters[prefix]++;
+      const ph = `[${prefix}_${counters[prefix]}]`;
+      mapping[ph] = match;
+      seen[match]  = ph;
+      return ph;
+    };
+  }
+
+  // MAC addresses first (before IPv4 to avoid partial matches)
+  text = text.replace(/\b(?:[0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}\b/g, makeReplacer("MAC"));
+  // IPv4
+  text = text.replace(/\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g, makeReplacer("IP"));
+  // IPv6 (full form)
+  text = text.replace(/\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g, makeReplacer("IPv6"));
+
+  // Hostname / Node / Host field values — plain-text "Key: value" format
+  text = text.replace(/^([ \t]*(?:Hostname|Node|Host)\s*:\s*)(\S+)/gim, (_, fieldPrefix, value) => {
+    if (Object.prototype.hasOwnProperty.call(seen, value)) return fieldPrefix + seen[value];
+    counters.HOSTNAME++;
+    const ph = `[HOSTNAME_${counters.HOSTNAME}]`;
+    mapping[ph] = value;
+    seen[value]  = ph;
+    return fieldPrefix + ph;
+  });
+
+  // Hostname / Node / Host — JSON "key": "value" format
+  text = text.replace(/"(?:hostname|node|host)"\s*:\s*"([^"]+)"/gi, (fullMatch, value) => {
+    if (Object.prototype.hasOwnProperty.call(seen, value)) {
+      return fullMatch.replace(value, seen[value]);
+    }
+    counters.HOSTNAME++;
+    const ph = `[HOSTNAME_${counters.HOSTNAME}]`;
+    mapping[ph] = value;
+    seen[value]  = ph;
+    return fullMatch.replace(value, ph);
+  });
+
+  return { redacted: text, mapping };
+}
+
 // ── AI Analysis ─────────────────────────────────────────────
 async function analyzeHit(hit) {
   if (!hit.message) {
@@ -549,14 +601,37 @@ function openAnalyzeModal(hit) {
   $("#modal-title").textContent = `AI Analyze — Match #${hit.idx}`;
   const body = $("#modal-body");
   body.innerHTML = "";
-  body.appendChild(el("p", { class: "muted" },
-    "Review / redact the message before sending it to Gemini."));
+
+  // Privacy notice — shown BEFORE the message
+  body.appendChild(el("div", { class: "privacy-notice" },
+    el("div", { class: "privacy-notice-title" }, "🔒 Privacy Protection Active"),
+    el("p", {},
+      "All IP addresses and MAC addresses will be automatically removed " +
+      "from this message before it is sent to Gemini AI. " +
+      "Gemini will only see placeholders like ",
+      el("code", {}, "[IP_1]"), ", ", el("code", {}, "[MAC_1]"), ", etc."),
+    el("p", {},
+      "After the AI drafts the ticket, ",
+      el("strong", {}, "you"),
+      " will be asked to manually fill in the real values — the AI never sees them."),
+  ));
+
+  // Pre-redact client-side so the textarea never shows real IPs/MACs/hostnames.
+  // We keep clientMapping here — it holds placeholder → original_value and is
+  // the authoritative source for auto-fill later (the server receives already-
+  // redacted text so its own pii_mapping will be empty).
+  const { redacted: preRedacted, mapping: clientMapping } = redactPii(hit.message || "");
+
+  body.appendChild(el("p", { class: "muted", style: "margin-top:10px;" },
+    "The message below has already been redacted. You may review or further edit it before sending."));
+
   const ta = el("textarea", {
-    rows: 14,
-    style: "width:100%;font-family:var(--ff-mono);font-size:12.5px;",
+    rows: 12,
+    style: "width:100%;font-family:var(--ff-mono);font-size:12.5px;margin-top:6px;",
   });
-  ta.value = hit.message;
+  ta.value = preRedacted;
   body.appendChild(ta);
+
   const bar = el("div", { class: "actions", style: "margin-top:14px;justify-content:flex-end;" },
     el("button", { class: "btn btn-ghost", onclick: () => closeModal() }, "Cancel"),
     el("button", {
@@ -569,9 +644,14 @@ function openAnalyzeModal(hit) {
             method: "POST",
             body: { message: ta.value },
           });
+          // Use the client-side mapping — it has the real original values.
+          // The server mapping is empty because we sent already-redacted text.
           state.analyses.unshift({
-            hit, analysis: data.analysis,
+            hit,
+            analysis: data.analysis,
             description_text: data.description_text,
+            pii_mapping: clientMapping,
+            redacted_message: preRedacted,
             at: new Date().toISOString(),
           });
           renderAnalyses();
@@ -716,10 +796,19 @@ async function draftMantisTicket(a) {
     project_name: suggested ? suggested.name : (state.config.mantis_projects[0]?.name || ""),
     view_state: "private",
     _source_analysis: a,
+    // Store originals so fill-in can always recompute from scratch
+    _orig_summary: a.analysis.summary || "Incident Report",
+    _orig_description: a.description_text,
+    _pii_mapping: a.pii_mapping || {},
   };
   renderTickets();
   switchTab("tickets");
-  toast(suggested ? `Suggested project: ${suggested.name}` : "Ticket drafted", { type: "info" });
+  toast(
+    suggested
+      ? `Project auto-selected: ${suggested.name} (from hostname)`
+      : "Ticket drafted — select a project manually",
+    { type: suggested ? "success" : "info", timeout: 3500 },
+  );
 }
 
 function renderTickets() {
@@ -744,6 +833,7 @@ function renderTickets() {
 function ticketDraftCard(t) {
   const projects = state.config?.mantis_projects || [];
   const card = el("article", { class: "analysis-card" });
+
   card.appendChild(el("header", {},
     el("h3", {}, "Draft Mantis ticket"),
     el("div", { class: "muted" }, "Review & edit before submitting."),
@@ -756,11 +846,111 @@ function ticketDraftCard(t) {
 
   const summary = el("input", { type: "text" });
   summary.value = t.summary;
-  summary.addEventListener("input", () => t.summary = summary.value);
+  summary.addEventListener("input", () => { t.summary = summary.value; });
 
   const description = el("textarea", { rows: 14, style: "font-family:var(--ff-mono);font-size:12.5px;" });
   description.value = t.description;
-  description.addEventListener("input", () => t.description = description.value);
+  description.addEventListener("input", () => { t.description = description.value; });
+
+  // ── PII fill-in section ─────────────────────────────────────
+  const piiMapping = t._pii_mapping || {};
+  const origSummary = t._orig_summary || t.summary;
+  const origDesc    = t._orig_description || t.description;
+
+  // Find every placeholder that actually appears in summary or description
+  const allText = origSummary + " " + origDesc;
+  const foundPh = [...new Set((allText.match(/\[(IP|IPv6|MAC)_\d+\]/g) || []))].sort();
+
+  if (foundPh.length) {
+    // Track user-entered values so we can recompute on each keystroke
+    const userValues = {};
+
+    function applyUserValues() {
+      let newSummary = origSummary;
+      let newDesc    = origDesc;
+      for (const [ph, val] of Object.entries(userValues)) {
+        if (val) {
+          newSummary = newSummary.replaceAll(ph, val);
+          newDesc    = newDesc.replaceAll(ph, val);
+        }
+      }
+      t.summary     = newSummary;
+      t.description = newDesc;
+      summary.value     = newSummary;
+      description.value = newDesc;
+    }
+
+    // Analyst notice banner
+    const noticeBanner = el("div", { class: "analyst-notice" },
+      el("div", { class: "analyst-notice-title" }, "ANALYST INPUT REQUIRED"),
+      el("p", {},
+        "The Mantis ticket below was drafted by Gemini AI using ",
+        el("strong", {}, "placeholders"),
+        ". The AI ",
+        el("strong", {}, "never"),
+        " had access to the real IP or MAC addresses."),
+      el("p", { class: "analyst-notice-emphasis" },
+        "YOU are now entering the real values. " +
+        "These are added by you — not by the AI."),
+    );
+
+    // Map placeholder → its input element so auto-fill can target them
+    const phInputs = {};
+
+    // Fill-in grid
+    const grid = el("div", { class: "pii-fill-grid" });
+    for (const ph of foundPh) {
+      const inp = el("input", {
+        type: "text",
+        placeholder: `Enter real value for ${ph}`,
+        class: "pii-fill-input",
+      });
+      phInputs[ph] = inp;
+      inp.addEventListener("input", () => {
+        userValues[ph] = inp.value.trim();
+        applyUserValues();
+      });
+      grid.appendChild(el("div", { class: "pii-fill-row" },
+        el("span", { class: "pii-placeholder" }, ph),
+        inp,
+      ));
+    }
+
+    // Auto-fill button — uses pii_mapping (placeholder → original) from the server
+    const autoFillBtn = el("button", {
+      class: "btn btn-secondary btn-sm",
+      style: "margin-top:12px;",
+      onclick: () => {
+        let filled = 0;
+        for (const ph of foundPh) {
+          const original = piiMapping[ph];
+          if (original && phInputs[ph]) {
+            phInputs[ph].value = original;
+            userValues[ph] = original;
+            filled++;
+          }
+        }
+        applyUserValues();
+        if (filled > 0) {
+          toast(`Auto-filled ${filled} redacted value${filled > 1 ? "s" : ""} from alert data`, { type: "success", timeout: 2500 });
+        } else {
+          toast("No original values available to auto-fill", { type: "warning" });
+        }
+      },
+    }, "⚡ Auto-fill from alert data");
+
+    const fillSection = el("section", { class: "analysis-section analyst-section" },
+      noticeBanner,
+      el("h4", { style: "margin-top:14px;" }, "Fill in redacted values"),
+      el("p", { class: "muted" },
+        "Use the button to auto-fill all values from the original alert, or type them manually. " +
+        "The description and summary update live."),
+      autoFillBtn,
+      grid,
+    );
+    card.appendChild(fillSection);
+  }
+  // ── end PII section ─────────────────────────────────────────
 
   const steps = el("input", { type: "text", placeholder: "OpenSearch Discover permalink" });
   steps.value = t.steps_to_reproduce;
@@ -793,11 +983,22 @@ function ticketDraftCard(t) {
   card.appendChild(sec("Steps to reproduce", steps));
   card.appendChild(sec("Additional information", addl));
 
+  // Project auto-selection notice
+  const hitHostname = t._source_analysis?.hit?.hostname || "";
+  const projectNotice = hitHostname
+    ? el("p", { class: "muted", style: "margin-top:6px;font-size:12px;" },
+        "📍 Project auto-selected from hostname: ",
+        el("code", { style: "font-size:11.5px;" }, hitHostname),
+        ". Change below if incorrect.")
+    : null;
+
   const metaGrid = el("div", { class: "field-row" },
     el("label", { class: "field" }, el("span", { class: "field-label" }, "Project"), projectSel),
     el("label", { class: "field" }, el("span", { class: "field-label" }, "Visibility"), visSel),
   );
-  card.appendChild(sec("Metadata", metaGrid));
+
+  const metaWrap = el("div", {}, metaGrid, projectNotice);
+  card.appendChild(sec("Metadata", metaWrap));
 
   const bar = el("div", { class: "alert-actions", style: "padding:14px 20px;border-top:1px solid var(--border);" },
     el("button", {
@@ -808,6 +1009,9 @@ function ticketDraftCard(t) {
         try {
           const payload = { ...t };
           delete payload._source_analysis;
+          delete payload._pii_mapping;
+          delete payload._orig_summary;
+          delete payload._orig_description;
           const res = await api("/api/mantis/submit", { method: "POST", body: payload });
           state.tickets.unshift({ ticket: t, result: res, submittedAt: new Date().toISOString() });
           saveTickets();

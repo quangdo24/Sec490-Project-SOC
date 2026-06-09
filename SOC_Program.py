@@ -1009,6 +1009,169 @@ def print_suricata_hit(idx: int, hit: dict):
     print(f"{C.CYAN}{'-' * 70}{C.RESET}")
 
 
+# -- PII Redaction -------------------------------------------------------------
+
+# Patterns for identifiable network data
+_IPV4_RE = re.compile(
+    r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
+)
+_IPV6_RE = re.compile(
+    r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b'
+    r'|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}'
+    r'|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}'
+    r'|::(?:[fF]{4}(?::0{1,4})?:)?(?:(?:25[0-5]|(?:2[0-4]|1?\d)?\d)\.){3}(?:25[0-5]|(?:2[0-4]|1?\d)?\d)'
+)
+_MAC_RE = re.compile(r'\b(?:[0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}\b')
+
+# Hostname / node / host fields — plain-text "Key: value" and JSON "key": "value" formats
+# Matches: Hostname: foo-bar, Node: foo-bar, Host: foo-bar
+#          "hostname": "foo-bar", "node": "foo-bar", "host": "foo-bar"
+_HOSTNAME_PLAINTEXT_RE = re.compile(
+    r'(?mi)^([ \t]*(?:Hostname|Node|Host)\s*:\s*)(\S+)',
+)
+_HOSTNAME_JSON_RE = re.compile(
+    r'(?i)("(?:hostname|node|host)"\s*:\s*")([^"]+)(")',
+)
+
+
+def redact_pii(text: str) -> tuple:
+    """Redact sensitive identifiable information before sending text to an AI API.
+
+    Replaces the following with sequentially numbered placeholders so no
+    entity-identifying data leaves the local machine:
+      - IPv4 / IPv6 addresses  → [IP_N] / [IPv6_N]
+      - MAC addresses           → [MAC_N]
+      - Hostname / Node values  → [HOSTNAME_N]
+
+    Identical values always reuse the same placeholder (de-duplication).
+
+    Returns:
+        (redacted_text, mapping)  where  mapping = {placeholder: original_value}
+    """
+    mapping: dict = {}   # placeholder → original
+    seen: dict = {}      # original → placeholder (de-duplicate)
+    counters: dict = {"IP": 0, "IPv6": 0, "MAC": 0, "HOSTNAME": 0}
+
+    def _make_replacer(prefix: str):
+        def replacer(m: re.Match) -> str:
+            original = m.group(0)
+            if original in seen:
+                return seen[original]
+            counters[prefix] += 1
+            placeholder = f"[{prefix}_{counters[prefix]}]"
+            mapping[placeholder] = original
+            seen[original] = placeholder
+            return placeholder
+        return replacer
+
+    def _hostname_plaintext_replacer(m: re.Match) -> str:
+        field_prefix = m.group(1)   # e.g. "Hostname: "
+        value        = m.group(2)   # e.g. "hedgehog-bonney-lake"
+        if value in seen:
+            return field_prefix + seen[value]
+        counters["HOSTNAME"] += 1
+        placeholder = f"[HOSTNAME_{counters['HOSTNAME']}]"
+        mapping[placeholder] = value
+        seen[value] = placeholder
+        return field_prefix + placeholder
+
+    def _hostname_json_replacer(m: re.Match) -> str:
+        key_open = m.group(1)   # e.g. '"hostname": "'
+        value    = m.group(2)   # e.g. "hedgehog-bonney-lake"
+        key_close= m.group(3)   # closing quote
+        if value in seen:
+            return key_open + seen[value] + key_close
+        counters["HOSTNAME"] += 1
+        placeholder = f"[HOSTNAME_{counters['HOSTNAME']}]"
+        mapping[placeholder] = value
+        seen[value] = placeholder
+        return key_open + placeholder + key_close
+
+    # MAC addresses first (before IPv4 to avoid hex-octet partial matches)
+    text = _MAC_RE.sub(_make_replacer("MAC"), text)
+    # IPv4
+    text = _IPV4_RE.sub(_make_replacer("IP"), text)
+    # IPv6
+    text = _IPV6_RE.sub(_make_replacer("IPv6"), text)
+    # Hostnames / node names (plain-text and JSON formats)
+    text = _HOSTNAME_PLAINTEXT_RE.sub(_hostname_plaintext_replacer, text)
+    text = _HOSTNAME_JSON_RE.sub(_hostname_json_replacer, text)
+
+    return text, mapping
+
+
+def print_redaction_summary(mapping: dict) -> None:
+    """Print a count-only summary of what was redacted — originals are never shown."""
+    if not mapping:
+        return
+    by_type: dict = {}
+    for ph in mapping:
+        prefix = ph.strip("[]").rsplit("_", 1)[0]
+        by_type[prefix] = by_type.get(prefix, 0) + 1
+
+    print(f"\n{C.BG_YEL}{C.BOLD}  PRIVACY NOTICE  {C.RESET}")
+    print(f"{C.BOLD}{C.YELLOW}{'=' * 70}{C.RESET}")
+    print(f"  {C.BOLD}{C.WHITE}The following identifying information has been REMOVED{C.RESET}")
+    print(f"  {C.BOLD}{C.WHITE}from the data before it is sent to Gemini AI:{C.RESET}")
+    print(f"{C.YELLOW}{'-' * 70}{C.RESET}")
+    for prefix, count in sorted(by_type.items()):
+        label = {"IP": "IPv4 address", "IPv6": "IPv6 address", "MAC": "MAC address", "HOSTNAME": "hostname/node"}.get(prefix, prefix)
+        noun = f"{label}es" if count > 1 else label
+        print(f"    {C.CYAN}{count} {noun}{C.RESET}  →  replaced with placeholders {C.DIM}([{prefix}_1], [{prefix}_2], …){C.RESET}")
+    print(f"{C.YELLOW}{'-' * 70}{C.RESET}")
+    print(f"  {C.BOLD}{C.GREEN}Gemini AI will NEVER see the real IP or MAC addresses.{C.RESET}")
+    print(f"  {C.DIM}After the AI drafts the ticket, YOU will be asked to manually{C.RESET}")
+    print(f"  {C.DIM}enter the real identifying values so they appear in Mantis —{C.RESET}")
+    print(f"  {C.DIM}not the AI.{C.RESET}")
+    print(f"{C.BOLD}{C.YELLOW}{'=' * 70}{C.RESET}\n")
+
+
+def prompt_fill_redacted_values(ticket: dict, mapping: dict) -> dict:
+    """Prompt the user to replace redacted placeholders with real values in a ticket dict.
+
+    Any placeholder that appears in any ticket field value is listed; the user
+    can type the real value or press Enter to leave the placeholder as-is.
+    Returns a new ticket dict with user-supplied replacements applied.
+    """
+    if not mapping:
+        return ticket
+
+    all_text = " ".join(str(v) for v in ticket.values())
+    used = [ph for ph in mapping if ph in all_text]
+    if not used:
+        return ticket
+
+    print(f"\n{C.BG_GRN}{C.BOLD}  ANALYST INPUT REQUIRED  {C.RESET}")
+    print(f"{C.BOLD}{C.GREEN}{'=' * 70}{C.RESET}")
+    print(f"  {C.BOLD}{C.WHITE}The Mantis ticket was drafted by Gemini AI using placeholders.{C.RESET}")
+    print(f"  {C.BOLD}{C.WHITE}The AI did NOT have access to the real identifying information.{C.RESET}")
+    print(f"{C.GREEN}{'-' * 70}{C.RESET}")
+    print(f"  {C.BOLD}{C.YELLOW}YOU{C.RESET} are now filling in the real values below.")
+    print(f"  {C.DIM}These values will be added to the ticket by YOU, not by the AI.{C.RESET}")
+    print(f"  {C.DIM}Press Enter on any field to leave the placeholder as-is.{C.RESET}")
+    print(f"{C.BOLD}{C.GREEN}{'=' * 70}{C.RESET}")
+
+    replacements: dict = {}
+    for ph in sorted(used):
+        print(f"\n  Placeholder in ticket : {C.CYAN}{ph}{C.RESET}")
+        val = input(f"  Enter real value      : ").strip()
+        if val:
+            replacements[ph] = val
+
+    if not replacements:
+        print(f"{C.DIM}  No values entered — placeholders kept as-is in the ticket.{C.RESET}")
+        return ticket
+
+    def _apply(s):
+        if not isinstance(s, str):
+            return s
+        for ph, val in replacements.items():
+            s = s.replace(ph, val)
+        return s
+
+    return {k: _apply(v) for k, v in ticket.items()}
+
+
 # -- Editor + Data Preview Helpers ---------------------------------------------
 
 def open_in_editor(text, suffix=".txt"):
@@ -1052,11 +1215,12 @@ def preview_and_cleanse_data(message):
     current = pretty_message(message)
 
     while True:
-        print(f"\n{C.BOLD}{C.WHITE}Data to be sent to Gemini AI:{C.RESET}")
+        print(f"\n{C.BOLD}{C.WHITE}Data to be sent to Gemini AI{C.RESET}  {C.GREEN}{C.BOLD}[PII REDACTED]{C.RESET}")
         print(f"{C.CYAN}{'-' * 70}{C.RESET}")
         for line in current.split("\n"):
             print(f"  {C.DIM}{line}{C.RESET}")
         print(f"{C.CYAN}{'-' * 70}{C.RESET}")
+        print(f"  {C.DIM}All IP and MAC addresses above have been replaced with placeholders.{C.RESET}")
 
         print(f"\n  {C.GREEN}1){C.RESET} Confirm and send")
         print(f"  {C.CYAN}2){C.RESET} Edit / cleanse in text editor")
@@ -1297,35 +1461,50 @@ def display_analysis(analysis):
 def match_hostname_to_project(hostname):
     """Try to match a hostname from the alert to a Mantis project.
 
-    Uses fuzzy matching: strips trailing digits, normalises separators,
-    and checks if the hostname *starts with* a project name (or vice-versa).
+    Hostnames often have a device-type prefix before the location, e.g.
+    ``hedgehog-bonney-lake`` or ``sensor-covington-01``.  The matcher
+    tries every hyphen-split *suffix* of the hostname so that the location
+    segment is found even when a device prefix is present.
+
+    Matching priority (highest first):
+      1. Exact flat match on any suffix    → returned immediately
+      2. Longest starts-with overlap       → best accumulated candidate
     Returns the best-matching project dict, or None.
     """
     if not hostname:
         return None
 
-    import re
-    # Normalise: lowercase, strip trailing digits, replace common separators
+    def _flatten(s: str) -> str:
+        return s.replace("-", "").replace("_", "").replace(" ", "")
+
     norm = hostname.lower().strip()
-    norm_no_digits = re.sub(r"\d+$", "", norm)          # bonney-lake2 → bonney-lake
-    norm_flat = norm_no_digits.replace("-", "").replace("_", "").replace(" ", "")  # bonneylake
+    # Strip trailing digits from each candidate (bonney-lake2 → bonney-lake)
+    norm_no_digits = re.sub(r"\d+$", "", norm)
+
+    # Build all hyphen-split suffixes, longest first:
+    #   "hedgehog-bonney-lake" → ["hedgehog-bonney-lake", "bonney-lake", "lake"]
+    parts = norm_no_digits.split("-")
+    candidates = ["-".join(parts[i:]) for i in range(len(parts))]
 
     best = None
-    best_len = 0  # prefer longest match
+    best_len = 0
 
     for proj in MANTIS_PROJECTS:
         pname = proj["name"].lower()
-        pflat = pname.replace("-", "").replace("_", "").replace(" ", "")
+        pflat = _flatten(pname)
 
-        # Exact match (after stripping trailing digits)
-        if norm_no_digits == pname or norm_flat == pflat:
-            return proj
+        for cand in candidates:
+            cand_flat = _flatten(cand)
 
-        # Hostname starts with project name or vice-versa
-        if norm_flat.startswith(pflat) or pflat.startswith(norm_flat):
-            if len(pflat) > best_len:
-                best = proj
-                best_len = len(pflat)
+            # Exact match — return immediately (highest confidence)
+            if cand == pname or cand_flat == pflat:
+                return proj
+
+            # Starts-with overlap — keep longest
+            if cand_flat.startswith(pflat) or pflat.startswith(cand_flat):
+                if len(pflat) > best_len:
+                    best = proj
+                    best_len = len(pflat)
 
     return best
 
@@ -1528,14 +1707,18 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
             print(f"{C.YELLOW}[!] Match {match_idx} has no 'message' field in _source. Skipping.{C.RESET}")
             continue
 
-        # Preview data and let user cleanse before sending
-        cleansed = preview_and_cleanse_data(message)
+        # Redact PII before the user sees/edits and before sending to Gemini
+        redacted_message, pii_mapping = redact_pii(message)
+        print_redaction_summary(pii_mapping)
+
+        # Preview the already-redacted data and let user cleanse further
+        cleansed = preview_and_cleanse_data(redacted_message)
         if cleansed is None:
             print(f"{C.YELLOW}[*] Cancelled.{C.RESET}")
             continue
 
-        # Send to Gemini
-        print(f"{C.CYAN}[*] Sending match {match_idx} to Gemini AI for analysis...{C.RESET}")
+        # Send redacted version to Gemini — no real IPs/MACs leave this machine
+        print(f"{C.CYAN}[*] Sending redacted match {match_idx} to Gemini AI for analysis...{C.RESET}")
         try:
             analysis = analyze_with_gemini(cleansed, gemini_secrets["api_key"])
             display_analysis(analysis)
@@ -1584,6 +1767,9 @@ def gemini_and_mantis_flow(hits, ip_to_abuseipdb):
             "project_name": project["name"],
             "view_state": view_state,
         }
+
+        # Restore real values for any placeholders the user wants to include
+        ticket = prompt_fill_redacted_values(ticket, pii_mapping)
 
         # Let user review / edit
         final_ticket = prompt_edit_ticket(ticket)

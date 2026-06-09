@@ -157,22 +157,53 @@ async function loadConfig() {
     }, labels[k]));
   }
 
-  // Examples list
+  // Examples list — grouped by category
   const list = $("#examples-list");
   list.innerHTML = "";
+
+  // Group queries by category, preserving insertion order
+  const groups = new Map();
   for (const ex of state.config.example_queries) {
-    const li = el("li", {
-      class: "example-item",
-      onclick: () => {
-        $("#q-query").value = ex.query;
-        $("#q-query").focus();
-        toast("Loaded example query", { type: "info", timeout: 1500 });
-      },
-    },
-      el("code", {}, ex.query),
-      el("div", { class: "example-desc" }, ex.description),
+    const cat = ex.category || "General";
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(ex);
+  }
+
+  for (const [category, queries] of groups) {
+    // Category header — clicking toggles the item list
+    const itemsId = `ex-group-${category.replace(/\s+/g, "-").toLowerCase()}`;
+    const header = el("li", { class: "example-category-header" },
+      el("span", { class: "example-category-label" }, category),
+      el("span", { class: "example-category-count" }, `${queries.length}`),
+      el("span", { class: "example-category-chevron" }, "▾"),
     );
-    list.appendChild(li);
+    header.addEventListener("click", () => {
+      const items = list.querySelector(`#${itemsId}`);
+      const collapsed = items.classList.toggle("collapsed");
+      header.querySelector(".example-category-chevron").textContent = collapsed ? "▸" : "▾";
+    });
+    list.appendChild(header);
+
+    // Item group container
+    const group = el("ul", { id: itemsId, class: "example-group" });
+    for (const ex of queries) {
+      const li = el("li", {
+        class: "example-item",
+        onclick: () => {
+          const ta = $("#q-query");
+          const existing = ta.value.trim();
+          ta.value = existing ? `${existing} AND ${ex.query}` : ex.query;
+          ta.focus();
+          ta.setSelectionRange(ta.value.length, ta.value.length);
+          toast(existing ? "Appended to query" : "Loaded example query", { type: "info", timeout: 1500 });
+        },
+      },
+        el("code", {}, ex.query),
+        el("div", { class: "example-desc" }, ex.description),
+      );
+      group.appendChild(li);
+    }
+    list.appendChild(group);
   }
 }
 
@@ -799,10 +830,16 @@ async function draftMantisTicket(a) {
     // Store originals so fill-in can always recompute from scratch
     _orig_summary: a.analysis.summary || "Incident Report",
     _orig_description: a.description_text,
+    _orig_additional_information: addlParts.join("\n\n"),
     _pii_mapping: a.pii_mapping || {},
   };
   renderTickets();
-  switchTab("tickets");
+  switchTab("analysis");
+  // Scroll the draft into view after a paint cycle
+  requestAnimationFrame(() => {
+    const draft = $("#ticket-draft-panel");
+    if (draft) draft.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   toast(
     suggested
       ? `Project auto-selected: ${suggested.name} (from hostname)`
@@ -812,22 +849,11 @@ async function draftMantisTicket(a) {
 }
 
 function renderTickets() {
-  const root = $("#tickets-panel");
+  const root = $("#ticket-draft-panel");
   root.innerHTML = "";
-
-  if (!state.pendingTicket && !state.tickets.length) {
-    root.appendChild(el("div", { class: "empty" },
-      el("div", { class: "empty-icon" }, "🎫"),
-      el("div", { class: "empty-title" }, "No tickets drafted"),
-      el("div", { class: "muted" }, "Run an AI analysis first, then click Create Mantis ticket."),
-    ));
-    return;
-  }
-
   if (state.pendingTicket) {
     root.appendChild(ticketDraftCard(state.pendingTicket));
   }
-  for (const t of state.tickets) root.appendChild(ticketSubmittedCard(t));
 }
 
 function ticketDraftCard(t) {
@@ -856,10 +882,11 @@ function ticketDraftCard(t) {
   const piiMapping = t._pii_mapping || {};
   const origSummary = t._orig_summary || t.summary;
   const origDesc    = t._orig_description || t.description;
+  const origAddl    = t._orig_additional_information || t.additional_information || "";
 
-  // Find every placeholder that actually appears in summary or description
-  const allText = origSummary + " " + origDesc;
-  const foundPh = [...new Set((allText.match(/\[(IP|IPv6|MAC)_\d+\]/g) || []))].sort();
+  // Find every placeholder across all text fields
+  const allText = origSummary + " " + origDesc + " " + origAddl;
+  const foundPh = [...new Set((allText.match(/\[(IP|IPv6|MAC|HOSTNAME)_\d+\]/g) || []))].sort();
 
   if (foundPh.length) {
     // Track user-entered values so we can recompute on each keystroke
@@ -868,16 +895,20 @@ function ticketDraftCard(t) {
     function applyUserValues() {
       let newSummary = origSummary;
       let newDesc    = origDesc;
+      let newAddl    = origAddl;
       for (const [ph, val] of Object.entries(userValues)) {
         if (val) {
           newSummary = newSummary.replaceAll(ph, val);
           newDesc    = newDesc.replaceAll(ph, val);
+          newAddl    = newAddl.replaceAll(ph, val);
         }
       }
-      t.summary     = newSummary;
-      t.description = newDesc;
+      t.summary                = newSummary;
+      t.description            = newDesc;
+      t.additional_information = newAddl;
       summary.value     = newSummary;
       description.value = newDesc;
+      addl.value        = newAddl;
     }
 
     // Analyst notice banner
@@ -1018,6 +1049,7 @@ function ticketDraftCard(t) {
           state.pendingTicket = null;
           renderTickets();
           renderSubmittedTickets();
+          switchTab("submitted");
           toast(`Ticket submitted — #${res.issue_id}`, { type: "success" });
         } catch (err) {
           toast(err.message, { type: "error", title: "Mantis failed" });
@@ -1198,8 +1230,8 @@ function initShortcuts() {
       $("#alerts-filter").focus();
     } else if (e.key.toLowerCase() === "t") {
       $("#theme-toggle").click();
-    } else if (/^[1-7]$/.test(e.key)) {
-      const order = ["query", "alerts", "enrichment", "analysis", "tickets", "submitted", "manual"];
+    } else if (/^[1-6]$/.test(e.key)) {
+      const order = ["query", "alerts", "enrichment", "analysis", "submitted", "manual"];
       switchTab(order[parseInt(e.key, 10) - 1]);
     }
   });

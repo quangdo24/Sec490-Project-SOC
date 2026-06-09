@@ -318,6 +318,19 @@ html[data-theme="light"] .theme-icon-light { display: inline; }
 .card-header h2 { margin: 0; font-size: 16px; }
 .card-header .muted { margin: 4px 0 0; font-size: 13px; }
 .card-body { padding: 18px 20px; }
+.examples-scroll-body {
+  max-height: 480px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.examples-scroll-body::-webkit-scrollbar { width: 6px; }
+.examples-scroll-body::-webkit-scrollbar-track { background: transparent; }
+.examples-scroll-body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
 
 /* ── Forms ────────────────────────────────────────────────── */
 .form { display: flex; flex-direction: column; gap: 14px; }
@@ -414,8 +427,63 @@ select { font-family: var(--ff); }
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
+
+/* Category header row */
+.example-category-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 4px;
+  margin-top: 6px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+}
+.example-category-header:first-child { margin-top: 0; }
+.example-category-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex: 1;
+}
+.example-category-count {
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 6px;
+  color: var(--text-muted);
+  min-width: 18px;
+  text-align: center;
+}
+.example-category-chevron {
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: transform .15s;
+}
+.example-category-header:hover .example-category-label,
+.example-category-header:hover .example-category-chevron {
+  color: var(--accent);
+}
+
+/* Item group */
+.example-group {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+.example-group.collapsed { display: none; }
+
+/* Individual item */
 .example-item {
   background: var(--surface-2);
   border: 1px solid var(--border);

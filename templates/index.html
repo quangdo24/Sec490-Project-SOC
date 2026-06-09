@@ -33,10 +33,7 @@
           <span class="badge" id="badge-ips" hidden>0</span>
         </button>
         <button class="nav-item" data-tab="analysis">
-          <span class="nav-icon">🤖</span><span>AI Analysis</span>
-        </button>
-        <button class="nav-item" data-tab="tickets">
-          <span class="nav-icon">🎫</span><span>Tickets</span>
+          <span class="nav-icon">🤖</span><span>Analysis & Ticket</span>
         </button>
         <button class="nav-item" data-tab="submitted">
           <span class="nav-icon">📋</span><span>My Tickets</span>
@@ -127,9 +124,9 @@
           <div class="card">
             <div class="card-header">
               <h2>Example queries</h2>
-              <p class="muted">Click to copy into the query box.</p>
+              <p class="muted">Click to append to the query box. Combines with AND.</p>
             </div>
-            <div class="card-body">
+            <div class="card-body examples-scroll-body">
               <ul id="examples-list" class="examples-list"></ul>
             </div>
           </div>
@@ -175,7 +172,7 @@
         </div>
       </section>
 
-      <!-- ░░ AI ANALYSIS TAB ░░ -->
+      <!-- ░░ AI ANALYSIS + TICKET DRAFT TAB ░░ -->
       <section class="tab" data-tab="analysis">
         <div id="analysis-panel">
           <div class="empty">
@@ -184,17 +181,7 @@
             <div class="muted">Open an alert and click <b>AI analyze</b> to send it to Gemini.</div>
           </div>
         </div>
-      </section>
-
-      <!-- ░░ TICKETS TAB ░░ -->
-      <section class="tab" data-tab="tickets">
-        <div id="tickets-panel">
-          <div class="empty">
-            <div class="empty-icon">🎫</div>
-            <div class="empty-title">No tickets drafted</div>
-            <div class="muted">Run an AI analysis first, then click <b>Create Mantis ticket</b>.</div>
-          </div>
-        </div>
+        <div id="ticket-draft-panel"></div>
       </section>
 
       <!-- ░░ MY TICKETS TAB ░░ -->

@@ -153,6 +153,30 @@
     color: var(--cyan-dim);
     background: rgba(41,231,200,0.05);
   }
+  .course-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.85rem;
+    margin-top: 0.4rem;
+  }
+  .course-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .course-card .code {
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    color: var(--cyan);
+    font-weight: 700;
+    margin-bottom: 0.35rem;
+  }
+  .course-card .name {
+    font-size: 0.98rem;
+    color: var(--text);
+    line-height: 1.35;
+  }
 
   /* two-column layout */
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 3vw; align-items: start; }
@@ -312,8 +336,9 @@
       <span class="chip">OpenSearch</span>
       <span class="chip">Suricata IDS</span>
       <span class="chip">AbuseIPDB</span>
-      <span class="chip">Gemini AI</span>
+      <span class="chip">Gemini 2.5</span>
       <span class="chip">MantisBT</span>
+      <span class="chip">Flask Web GUI</span>
       <span class="chip">Python</span>
     </div>
     <div class="meta">
@@ -385,8 +410,9 @@
     </div>
     <ul class="bullets">
       <li>One tool ties together five steps that used to live in five different places.</li>
-      <li>Color-coded results show <b>severity, source/destination IPs, protocol, and location</b> at a glance.</li>
-      <li>Same core logic powers both a <b>terminal CLI</b> and a <b>SIEM-style web GUI</b> (Flask).</li>
+      <li>Color-coded results show <b>severity, source/destination IPs, protocol, GeoIP, and traffic stats</b> at a glance.</li>
+      <li>Same core logic powers a <b>terminal CLI</b> and a <b>SIEM-style Flask web console</b> — Search, Alerts, IP Enrichment, Analysis &amp; Ticket, and My Tickets tabs.</li>
+      <li>Click-through <b>OpenSearch Discover</b> links jump straight to the raw document for deeper investigation.</li>
     </ul>
     <div class="callout"><b>Human-in-the-loop checkpoint:</b> nothing is sent to AI or filed as a ticket until I review it.</div>
   </section>
@@ -406,15 +432,15 @@
       <div class="panel">
         <h3>// AI &amp; Ticketing</h3>
         <ul class="bullets">
-          <li>Gemini gets a <b>structured prompt</b> → returns strict JSON: summary, what/why/result, recommended action.</li>
-          <li><b class="accent-amber">In-page redaction</b> step before any data leaves for the AI.</li>
-          <li>Auto-detects the <b>MantisBT project</b> from the host, then drafts &amp; submits via API.</li>
+          <li><code class="k">gemini-2.5-flash</code> gets a <b>structured prompt</b> → returns strict JSON: summary, what/why/result, recommended action.</li>
+          <li><b class="accent-amber">Automatic PII redaction</b> (IPs, MACs) before any data leaves for the AI — with an in-page review step in the web GUI.</li>
+          <li>Auto-detects the <b>MantisBT project</b> from the host, drafts &amp; submits via API, and tracks submissions in <b>My Tickets</b>.</li>
         </ul>
       </div>
     </div>
     <ul class="bullets" style="margin-top:1.6rem;">
-      <li><b>Security built in:</b> credentials are git-ignored, and a <code class="k">Bandit</code> static scan runs in CI on every push.</li>
-      <li class="accent-green"><b>Takeaway:</b> the machine does the heavy lifting; I stay in control, verify accuracy, and learn the tradecraft along the way.</li>
+      <li><b>Web console extras:</b> light/dark themes, built-in Manual tab, keyboard shortcuts, and live secret-status indicators.</li>
+      <li><b>Security built in:</b> credentials are git-ignored, and a <code class="k">Bandit</code> static scan runs in CI on every push/PR.</li>
     </ul>
   </section>
 
@@ -431,9 +457,52 @@
     </p>
   </section>
 
+  <!-- SLIDE 7 — TAKEAWAYS & COURSES -->
+  <section class="slide">
+    <h2><span class="num">06</span>Takeaways &amp; What Got Me Here</h2>
+    <div class="cols">
+      <div>
+        <div class="kicker" style="margin-bottom:1.4rem;">Key Takeaways</div>
+        <ul class="bullets">
+          <li class="accent-green"><b>Automation saves time, not judgment.</b> SOC Sentinel handles search, enrichment, and drafting — the analyst still verifies every step.</li>
+          <li><b>Human-in-the-loop is non-negotiable.</b> PII redaction and manual review happen before AI analysis or ticket submission.</li>
+          <li><b>One pipeline, two interfaces.</b> CLI and web GUI share the same core logic — build once, use anywhere.</li>
+          <li><b>Security is part of the design.</b> Git-ignored secrets, Bandit CI scans, and least-privilege API keys from day one.</li>
+          <li><b>Built to learn, not to hide.</b> As a student project, staying involved at each stage taught me real SOC tradecraft.</li>
+        </ul>
+      </div>
+      <div>
+        <div class="kicker" style="margin-bottom:1.4rem;">Courses That Inspired This Project</div>
+        <div class="course-grid">
+          <div class="course-card">
+            <div class="code">SEC444</div>
+            <div class="name">Security Automation</div>
+          </div>
+          <div class="course-card">
+            <div class="code">SEC450</div>
+            <div class="name">Security Automation</div>
+          </div>
+          <div class="course-card">
+            <div class="code">DEV300</div>
+            <div class="name">Problem Solving Strategies</div>
+          </div>
+          <div class="course-card">
+            <div class="code">IT212–213</div>
+            <div class="name">Networking</div>
+          </div>
+        </div>
+        <p class="lead" style="margin-top:1.6rem; font-size:1.05rem;">Automation from SEC444/450, structured problem-solving from DEV300, and network fundamentals from IT212–213 all shaped how SOC Sentinel was designed and built.</p>
+      </div>
+    </div>
+    <div class="meta" style="margin-top:2rem;">
+      <span><b>Thank you</b> — questions?</span>
+      <span><b>GitHub:</b> Sec490-Project-SOC</span>
+    </div>
+  </section>
+
 </div>
 
-<div class="counter"><b id="cur">01</b> / <span id="total">05</span></div>
+<div class="counter"><b id="cur">01</b> / <span id="total">06</span></div>
 <div class="nav">
   <button id="prev" aria-label="Previous">‹</button>
   <button id="next" aria-label="Next">›</button>

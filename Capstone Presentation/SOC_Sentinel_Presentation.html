@@ -58,8 +58,9 @@
     position: absolute; inset: 0;
     display: none;
     flex-direction: column;
-    justify-content: center;
-    padding: 6vh 9vw;
+    justify-content: flex-start;
+    padding: 5vh 9vw 4vh;
+    overflow-y: auto;
     animation: fade 0.45s ease;
   }
   .slide.active { display: flex; }
@@ -95,24 +96,39 @@
   h1 .glow { color: var(--cyan); text-shadow: 0 0 28px rgba(41,231,200,0.45); }
 
   h2 {
-    font-size: clamp(1.8rem, 3.6vw, 3rem);
+    font-size: clamp(1.8rem, 3.4vw, 2.8rem);
     font-weight: 800;
     letter-spacing: -0.01em;
     line-height: 1.05;
-    margin-bottom: 2.2rem;
+    margin-bottom: 1.6rem;
   }
   h2 .num { color: var(--cyan); font-family: var(--mono); font-size: 0.55em; vertical-align: super; margin-right: 0.5rem; }
 
-  p.lead { font-size: 1.25rem; color: var(--muted); margin-top: 1.4rem; max-width: 60ch; }
+  p.lead { font-size: 1.2rem; color: var(--muted); margin-top: 1.2rem; max-width: 64ch; line-height: 1.55; }
 
-  ul.bullets { list-style: none; max-width: 78ch; }
+  ul.bullets { list-style: none; max-width: 82ch; }
   ul.bullets li {
     position: relative;
     padding-left: 2.1rem;
-    margin-bottom: 1.15rem;
-    font-size: clamp(1.05rem, 1.7vw, 1.4rem);
-    line-height: 1.45;
+    margin-bottom: 1rem;
+    font-size: clamp(1.05rem, 1.7vw, 1.38rem);
+    line-height: 1.5;
     color: var(--text);
+  }
+
+  /* Use on slides with lots of content to keep everything on-screen */
+  .slide.dense ul.bullets li {
+    font-size: clamp(0.92rem, 1.3vw, 1.1rem);
+    margin-bottom: 0.65rem;
+    line-height: 1.42;
+  }
+  .slide.dense h2 {
+    font-size: clamp(1.4rem, 2.6vw, 2.1rem);
+    margin-bottom: 1rem;
+  }
+  .slide.dense .panel ul.bullets li {
+    font-size: clamp(0.82rem, 1.1vw, 0.98rem);
+    margin-bottom: 0.5rem;
   }
   ul.bullets li::before {
     content: "▸";
@@ -135,15 +151,15 @@
   .accent-green { color: var(--green) !important; }
 
   .meta {
-    margin-top: 3rem;
+    margin-top: 1.4rem;
     font-family: var(--mono);
     color: var(--muted);
-    font-size: 0.95rem;
-    display: flex; flex-wrap: wrap; gap: 1.6rem;
+    font-size: 0.9rem;
+    display: flex; flex-wrap: wrap; gap: 1.4rem;
   }
   .meta b { color: var(--text); font-weight: 600; }
 
-  .tagchips { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 2rem; }
+  .tagchips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.2rem; }
   .chip {
     font-family: var(--mono);
     font-size: 0.78rem;
@@ -155,15 +171,15 @@
   }
   .course-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 0.85rem;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.6rem;
     margin-top: 0.4rem;
   }
   .course-card {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 12px;
-    padding: 1rem 1.1rem;
+    padding: 0.7rem 0.9rem;
   }
   .course-card .code {
     font-family: var(--mono);
@@ -179,38 +195,42 @@
   }
 
   /* two-column layout */
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 3vw; align-items: start; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5vw; align-items: start; }
   .panel {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 14px;
-    padding: 1.5rem 1.6rem;
+    padding: 1rem 1.2rem;
     backdrop-filter: blur(6px);
   }
   .panel h3 {
     font-family: var(--mono);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--cyan);
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
+  }
+  .panel ul.bullets li {
+    font-size: clamp(0.82rem, 1.2vw, 1rem);
+    margin-bottom: 0.55rem;
   }
 
   /* pipeline flow (slide 4) */
-  .pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin-bottom: 1.8rem; }
+  .pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin-bottom: 1rem; }
   .stage {
     flex: 1 1 0;
-    min-width: 140px;
+    min-width: 120px;
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 12px;
-    padding: 1.1rem 1rem;
+    padding: 0.75rem 0.7rem;
     position: relative;
     text-align: center;
   }
-  .stage .ico { font-size: 1.5rem; margin-bottom: 0.5rem; }
-  .stage .t { font-weight: 700; font-size: 0.98rem; margin-bottom: 0.3rem; }
-  .stage .d { font-size: 0.78rem; color: var(--muted); font-family: var(--mono); line-height: 1.35; }
+  .stage .ico { font-size: 1.25rem; margin-bottom: 0.3rem; }
+  .stage .t { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.2rem; }
+  .stage .d { font-size: 0.72rem; color: var(--muted); font-family: var(--mono); line-height: 1.3; }
   .arrow {
     align-self: center;
     color: var(--cyan);
@@ -223,12 +243,12 @@
   .stage.human .ico, .stage.human .t { color: var(--amber); }
 
   .callout {
-    margin-top: 0.5rem;
+    margin-top: 0.6rem;
     border-left: 3px solid var(--amber);
     background: rgba(255,204,102,0.07);
-    padding: 1rem 1.3rem;
+    padding: 0.7rem 1.1rem;
     border-radius: 0 10px 10px 0;
-    font-size: 1.05rem;
+    font-size: 0.95rem;
     color: var(--text);
     max-width: 80ch;
   }
@@ -358,7 +378,6 @@
       <li>Finally, a <b>MantisBT ticket is drafted manually</b>, re-typing the same fields every time.</li>
       <li class="accent-red"><b>Result:</b> repetitive, time-consuming, error-prone work with constant context-switching between OpenSearch, AbuseIPDB, and the ticketing system.</li>
     </ul>
-    <p class="lead">One interesting log → research → threat decision → ticket. Today that's almost entirely manual.</p>
   </section>
 
   <!-- SLIDE 3 — GOALS & INTENT -->
@@ -371,11 +390,10 @@
       <li><b class="accent-amber">Keep a human in the loop</b> — the analyst verifies that the information is accurate before anything is filed.</li>
       <li><b class="accent-amber">Stay a learning tool, not a black box</b> — as a student, I stay involved so I actually understand what's happening at each step.</li>
     </ul>
-    <p class="lead">Speed up the busywork; keep the human responsible for the decision.</p>
   </section>
 
   <!-- SLIDE 4 — HOW IT WORKS (MID LEVEL) -->
-  <section class="slide">
+  <section class="slide dense">
     <h2><span class="num">03</span>How It Works — The Pipeline</h2>
     <div class="pipeline">
       <div class="stage">
@@ -408,25 +426,34 @@
         <div class="d">MantisBT auto-drafted</div>
       </div>
     </div>
-    <ul class="bullets">
-      <li>One tool ties together five steps that used to live in five different places.</li>
-      <li>Color-coded results show <b>severity, source/destination IPs, protocol, GeoIP, and traffic stats</b> at a glance.</li>
-      <li>Same core logic powers a <b>terminal CLI</b> and a <b>SIEM-style Flask web console</b> — Search, Alerts, IP Enrichment, Analysis &amp; Ticket, and My Tickets tabs.</li>
-      <li>Click-through <b>OpenSearch Discover</b> links jump straight to the raw document for deeper investigation.</li>
-    </ul>
-    <div class="callout"><b>Human-in-the-loop checkpoint:</b> nothing is sent to AI or filed as a ticket until I review it.</div>
+    <div class="cols" style="margin-top:1.2rem;">
+      <div class="panel">
+        <ul class="bullets">
+          <li>One tool ties together <b>five steps</b> that used to live in five different places.</li>
+          <li>Color-coded results show <b>severity, IPs, protocol, GeoIP, and traffic stats</b> at a glance.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <ul class="bullets">
+          <li>Same logic powers a <b>terminal CLI</b> and a <b>SIEM-style web console</b> — Search, Alerts, Enrichment, Analysis, and Tickets.</li>
+          <li>Click-through <b>OpenSearch Discover</b> links jump directly to the raw document for deeper investigation.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:1rem;"><b>Human-in-the-loop checkpoint:</b> nothing is sent to AI or filed as a ticket until I review it.</div>
   </section>
 
   <!-- SLIDE 5 — UNDER THE HOOD (LOW LEVEL) -->
   <section class="slide">
     <h2><span class="num">04</span>Under the Hood</h2>
+    <p class="lead" style="margin-bottom:1.4rem;">A look at how each layer of the tool is implemented — from querying the data source to filing the ticket.</p>
     <div class="cols">
       <div class="panel">
         <h3>// Data &amp; Enrichment</h3>
         <ul class="bullets">
           <li>Python queries OpenSearch using <code class="k">Lucene</code> via the Dashboards Dev Tools proxy.</li>
-          <li>CIDR / wildcard IPs auto-convert to range syntax before sending.</li>
           <li>Public source IPs looked up in <b>AbuseIPDB</b> → confidence/risk score.</li>
+          <li>Each alert surfaces <b>GeoIP, ASN, severity, and traffic-flow context</b> — giving analysts full situational awareness without manual lookup.</li>
         </ul>
       </div>
       <div class="panel">
@@ -438,15 +465,10 @@
         </ul>
       </div>
     </div>
-    <ul class="bullets" style="margin-top:1.6rem;">
-      <li><b>Web console extras:</b> light/dark themes, built-in Manual tab, keyboard shortcuts, and live secret-status indicators.</li>
-      <li><b>Security built in:</b> credentials are git-ignored, and a <code class="k">Bandit</code> static scan runs in CI on every push/PR.</li>
-    </ul>
   </section>
 
   <!-- SLIDE 6 — LIVE DEMO -->
   <section class="slide" style="align-items:center; text-align:center;">
-    <div class="kicker" style="justify-content:center;">See It In Action</div>
     <h2 style="margin-bottom:1.4rem;"><span class="num">05</span>Live Demo</h2>
     <div class="videowrap" id="videowrap">
       <iframe src="https://www.youtube.com/embed/aa9aTHRhbGc?si=HuaSXDwFaNudORbZ" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
@@ -458,7 +480,7 @@
   </section>
 
   <!-- SLIDE 7 — TAKEAWAYS & COURSES -->
-  <section class="slide">
+  <section class="slide dense">
     <h2><span class="num">06</span>Takeaways &amp; What Got Me Here</h2>
     <div class="cols">
       <div>
@@ -467,7 +489,7 @@
           <li class="accent-green"><b>Automation saves time, not judgment.</b> SOC Sentinel handles search, enrichment, and drafting — the analyst still verifies every step.</li>
           <li><b>Human-in-the-loop is non-negotiable.</b> PII redaction and manual review happen before AI analysis or ticket submission.</li>
           <li><b>One pipeline, two interfaces.</b> CLI and web GUI share the same core logic — build once, use anywhere.</li>
-          <li><b>Security is part of the design.</b> Git-ignored secrets, Bandit CI scans, and least-privilege API keys from day one.</li>
+          <li><b>Security is part of the design.</b> Git-ignored secrets and least-privilege API keys from day one.</li>
           <li><b>Built to learn, not to hide.</b> As a student project, staying involved at each stage taught me real SOC tradecraft.</li>
         </ul>
       </div>
@@ -491,12 +513,7 @@
             <div class="name">Networking</div>
           </div>
         </div>
-        <p class="lead" style="margin-top:1.6rem; font-size:1.05rem;">Automation from SEC444/450, structured problem-solving from DEV300, and network fundamentals from IT212–213 all shaped how SOC Sentinel was designed and built.</p>
       </div>
-    </div>
-    <div class="meta" style="margin-top:2rem;">
-      <span><b>Thank you</b> — questions?</span>
-      <span><b>GitHub:</b> Sec490-Project-SOC</span>
     </div>
   </section>
 
@@ -507,7 +524,6 @@
   <button id="prev" aria-label="Previous">‹</button>
   <button id="next" aria-label="Next">›</button>
 </div>
-<div class="hint">← / → or SPACE to navigate · F for fullscreen</div>
 
 <script>
   const slides = Array.from(document.querySelectorAll('.slide'));

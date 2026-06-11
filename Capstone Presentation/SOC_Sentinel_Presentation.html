@@ -269,7 +269,7 @@
     box-shadow: 0 0 0 1px rgba(41,231,200,0.08), 0 24px 70px rgba(0,0,0,0.55), 0 0 60px rgba(41,231,200,0.10);
   }
   .videowrap video,
-  .videowrap iframe { width: 100%; height: 100%; display: block; border: 0; object-fit: cover; }
+  .videowrap iframe { width: 100%; height: 100%; display: block; border: 0; object-fit: contain; background: #04070c; }
   .videowrap .placeholder {
     position: absolute; inset: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -471,11 +471,17 @@
   <section class="slide" style="align-items:center; text-align:center;">
     <h2 style="margin-bottom:1.4rem;"><span class="num">05</span>Live Demo</h2>
     <div class="videowrap" id="videowrap">
-      <iframe src="https://www.youtube.com/embed/aa9aTHRhbGc?si=HuaSXDwFaNudORbZ" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+      <video controls playsinline preload="metadata" title="SOC Sentinel Live Demo">
+        <source src="Final_Project.mp4" type="video/mp4">
+        Your browser does not support embedded video.
+      </video>
     </div>
     <p class="lead" style="margin-top:1.4rem; text-align:center;">Watch the full workflow: search&nbsp;→&nbsp;enrich&nbsp;→&nbsp;AI&nbsp;analysis&nbsp;→&nbsp;human&nbsp;review&nbsp;→&nbsp;ticket.</p>
     <p style="margin-top:.6rem; text-align:center; font-size:.95rem; opacity:.85;">
-      Video not loading? <a href="https://www.youtube.com/watch?v=aa9aTHRhbGc" target="_blank" rel="noopener" style="color:#29e7c8; font-weight:600; text-decoration:none;">Watch on YouTube&nbsp;↗</a>
+      Video not playing?
+      <a href="Final_Project.mp4" target="_blank" rel="noopener" style="color:#29e7c8; font-weight:600; text-decoration:none;">Open video file&nbsp;↗</a>
+      &nbsp;·&nbsp;
+      <a href="https://youtu.be/Tr3n5xet5YI" target="_blank" rel="noopener" style="color:#29e7c8; font-weight:600; text-decoration:none;">Watch on YouTube&nbsp;↗</a>
     </p>
   </section>
 

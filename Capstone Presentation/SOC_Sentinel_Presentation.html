@@ -216,8 +216,13 @@
     margin-bottom: 0.55rem;
   }
 
-  /* pipeline flow (slide 4) */
+  /* pipeline flow */
   .pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin-bottom: 1rem; }
+  .slide.dense .pipeline { margin-bottom: 0.65rem; }
+  .slide.dense .pipeline .stage { padding: 0.6rem 0.55rem; }
+  .slide.dense .pipeline .stage .t { font-size: 0.82rem; }
+  .slide.dense .pipeline .stage .d { font-size: 0.66rem; }
+  .slide.dense .pipeline .arrow { font-size: 1.25rem; }
   .stage {
     flex: 1 1 0;
     min-width: 120px;
@@ -333,6 +338,31 @@
     z-index: 10; letter-spacing: 0.1em;
   }
 
+  /* problem workflow diagram (slide 1) */
+  .problem-layout { align-items: center; gap: 2rem; margin-top: 0.25rem; }
+  .problem-layout ul.bullets { max-width: none; }
+  .problem-layout ul.bullets li {
+    font-size: clamp(0.88rem, 1.25vw, 1.05rem);
+    margin-bottom: 0.7rem;
+  }
+  .problem-diagram {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 0.85rem 1rem 0.75rem;
+    box-shadow: 0 0 40px rgba(41,231,200,0.06);
+  }
+  .problem-diagram svg { width: 100%; height: auto; display: block; }
+  .problem-diagram .caption {
+    margin-top: 0.55rem;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+  }
+
   @media (max-width: 760px) {
     .cols { grid-template-columns: 1fr; }
     .pipeline { flex-direction: column; }
@@ -351,7 +381,7 @@
   <section class="slide active">
     <div class="kicker">Capstone Final Project</div>
     <h1>SOC <span class="glow">Sentinel</span><br/>An AI-Assisted SOC<br/>Analyst Workflow</h1>
-    <p class="lead">Automating Suricata alert triage, threat research, and ticket creation.</p>
+    <p class="lead">Automating alert search, threat research, and ticket creation.</p>
     <div class="tagchips">
       <span class="chip">OpenSearch</span>
       <span class="chip">Suricata IDS</span>
@@ -369,32 +399,84 @@
   </section>
 
   <!-- SLIDE 2 — THE PROBLEM -->
-  <section class="slide">
-    <h2><span class="num">01</span>The Problem — Why This Project</h2>
-    <ul class="bullets">
-      <li>SOC analysts must manually sift through <b>thousands of Suricata IDS logs</b> in OpenSearch just to find one alert worth investigating.</li>
-      <li>Each interesting log then has to be <b>researched by hand</b> — looking up source IPs, reputation, and geolocation across separate tools.</li>
-      <li>The analyst has to <b>decide if it's a real threat</b> — slow, judgment-heavy, and easy to get wrong under volume.</li>
-      <li>Finally, a <b>MantisBT ticket is drafted manually</b>, re-typing the same fields every time.</li>
-      <li class="accent-red"><b>Result:</b> repetitive, time-consuming, error-prone work with constant context-switching between OpenSearch, AbuseIPDB, and the ticketing system.</li>
-    </ul>
-  </section>
-
-  <!-- SLIDE 3 — GOALS & INTENT -->
-  <section class="slide">
-    <h2><span class="num">02</span>Goal &amp; Intent</h2>
-    <ul class="bullets">
-      <li><b class="accent-green">Automate the repetitive parts</b> of the triage pipeline — searching, enriching, and summarizing alerts.</li>
-      <li><b class="accent-green">Implement AI as a SOC analyst assistant</b> — Gemini reads the raw alert and produces a plain-English incident report.</li>
-      <li><b class="accent-green">Automate ticket creation</b> — the analysis is turned into a structured MantisBT ticket with one action.</li>
-      <li><b class="accent-amber">Keep a human in the loop</b> — the analyst verifies that the information is accurate before anything is filed.</li>
-      <li><b class="accent-amber">Stay a learning tool, not a black box</b> — as a student, I stay involved so I actually understand what's happening at each step.</li>
-    </ul>
-  </section>
-
-  <!-- SLIDE 4 — HOW IT WORKS (MID LEVEL) -->
   <section class="slide dense">
-    <h2><span class="num">03</span>How It Works — The Pipeline</h2>
+    <h2><span class="num">01</span>The Problem — Why This Project</h2>
+    <div class="cols problem-layout">
+      <div>
+        <ul class="bullets">
+          <li>SOC analysts must manually sift through <b>thousands of Suricata IDS logs</b> in OpenSearch just to find one alert worth investigating.</li>
+          <li>Each interesting log then has to be <b>researched by hand</b> — looking up source IPs, reputation, and geolocation across separate tools.</li>
+          <li>The analyst has to <b>decide if it's a real threat</b> — slow, judgment-heavy, and easy to get wrong under volume.</li>
+          <li>Finally, a <b>MantisBT ticket is drafted manually</b>, re-typing the same fields every time.</li>
+          <li class="accent-red"><b>Result:</b> repetitive, time-consuming, error-prone work with constant context-switching between OpenSearch, AbuseIPDB, and the ticketing system.</li>
+        </ul>
+      </div>
+      <div class="problem-diagram" aria-label="Diagram of the manual SOC analyst workflow problem">
+        <svg viewBox="0 0 520 340" role="img" aria-labelledby="problem-diagram-title problem-diagram-desc">
+          <title id="problem-diagram-title">Manual SOC analyst workflow</title>
+          <desc id="problem-diagram-desc">An analyst manually moves between OpenSearch, AbuseIPDB, judgment, and MantisBT with no unified workflow.</desc>
+          <defs>
+            <linearGradient id="panelGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#101826" stop-opacity="0.95"/>
+              <stop offset="100%" stop-color="#0c121d" stop-opacity="0.95"/>
+            </linearGradient>
+            <marker id="arrowCyan" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#29e7c8"/>
+            </marker>
+            <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#ff6b8a"/>
+            </marker>
+          </defs>
+
+          <!-- OpenSearch -->
+          <rect x="24" y="24" width="148" height="72" rx="12" fill="url(#panelGrad)" stroke="rgba(86,220,198,0.35)" stroke-width="1.5"/>
+          <text x="98" y="52" text-anchor="middle" fill="#29e7c8" font-family="monospace" font-size="13" font-weight="700">OpenSearch</text>
+          <text x="98" y="72" text-anchor="middle" fill="#8aa0ac" font-family="monospace" font-size="10">Thousands of Suricata logs</text>
+
+          <!-- Analyst -->
+          <rect x="186" y="126" width="148" height="72" rx="12" fill="url(#panelGrad)" stroke="rgba(255,204,102,0.45)" stroke-width="1.5"/>
+          <text x="260" y="156" text-anchor="middle" fill="#ffcc66" font-family="monospace" font-size="13" font-weight="700">SOC Analyst</text>
+          <text x="260" y="176" text-anchor="middle" fill="#8aa0ac" font-family="monospace" font-size="10">Manual review &amp; judgment</text>
+
+          <!-- AbuseIPDB -->
+          <rect x="348" y="24" width="148" height="72" rx="12" fill="url(#panelGrad)" stroke="rgba(86,220,198,0.35)" stroke-width="1.5"/>
+          <text x="422" y="52" text-anchor="middle" fill="#29e7c8" font-family="monospace" font-size="13" font-weight="700">AbuseIPDB</text>
+          <text x="422" y="72" text-anchor="middle" fill="#8aa0ac" font-family="monospace" font-size="10">IP reputation &amp; GeoIP</text>
+
+          <!-- MantisBT -->
+          <rect x="348" y="244" width="148" height="72" rx="12" fill="url(#panelGrad)" stroke="rgba(86,220,198,0.35)" stroke-width="1.5"/>
+          <text x="422" y="274" text-anchor="middle" fill="#29e7c8" font-family="monospace" font-size="13" font-weight="700">MantisBT</text>
+          <text x="422" y="294" text-anchor="middle" fill="#8aa0ac" font-family="monospace" font-size="10">Manual ticket entry</text>
+
+          <!-- Manual flow arrows -->
+          <path d="M172 60 C 210 60, 210 126, 234 150" fill="none" stroke="#29e7c8" stroke-width="1.6" marker-end="url(#arrowCyan)"/>
+          <text x="188" y="98" fill="#67ffab" font-family="monospace" font-size="9">sift logs</text>
+
+          <path d="M334 162 C 370 162, 390 96, 348 78" fill="none" stroke="#ff6b8a" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrowRed)"/>
+          <text x="362" y="118" fill="#ff6b8a" font-family="monospace" font-size="9">lookup by hand</text>
+
+          <path d="M334 178 C 372 210, 390 244, 348 268" fill="none" stroke="#ff6b8a" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrowRed)"/>
+          <text x="358" y="228" fill="#ff6b8a" font-family="monospace" font-size="9">re-type fields</text>
+
+          <path d="M186 168 C 130 168, 98 120, 98 96" fill="none" stroke="#ff6b8a" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrowRed)"/>
+          <text x="72" y="142" fill="#ff6b8a" font-family="monospace" font-size="9">back to logs</text>
+
+          <path d="M422 96 C 422 112, 300 112, 260 126" fill="none" stroke="#ff6b8a" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrowRed)"/>
+          <text x="318" y="108" fill="#ff6b8a" font-family="monospace" font-size="9">switch tabs</text>
+
+          <!-- Pain callout -->
+          <rect x="24" y="244" width="260" height="72" rx="12" fill="rgba(255,107,138,0.08)" stroke="rgba(255,107,138,0.35)" stroke-width="1.5"/>
+          <text x="154" y="272" text-anchor="middle" fill="#ff6b8a" font-family="monospace" font-size="12" font-weight="700">DISCONNECTED TOOLS</text>
+          <text x="154" y="292" text-anchor="middle" fill="#e7f0f5" font-family="monospace" font-size="10">Repetitive · Slow · Error-prone</text>
+        </svg>
+        <div class="caption">Manual workflow — no single pipeline</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 3 — GOALS, INTENT & PIPELINE -->
+  <section class="slide dense">
+    <h2><span class="num">02</span>Goal &amp; Intent — The Pipeline</h2>
     <div class="pipeline">
       <div class="stage">
         <div class="ico">🔍</div>
@@ -404,7 +486,7 @@
       <div class="arrow">→</div>
       <div class="stage">
         <div class="ico">🌐</div>
-        <div class="t">Enrich</div>
+        <div class="t">Research</div>
         <div class="d">AbuseIPDB risk score + GeoIP</div>
       </div>
       <div class="arrow">→</div>
@@ -426,34 +508,40 @@
         <div class="d">MantisBT auto-drafted</div>
       </div>
     </div>
-    <div class="cols" style="margin-top:1.2rem;">
+    <div class="cols" style="margin-top:0.9rem;">
       <div class="panel">
+        <h3>Goals</h3>
         <ul class="bullets">
-          <li>One tool ties together <b>five steps</b> that used to live in five different places.</li>
-          <li>Color-coded results show <b>severity, IPs, protocol, GeoIP, and traffic stats</b> at a glance.</li>
+          <li><b class="accent-green">Automate the repetitive work</b> — search, threat research, summarization, and ticket prep in one pipeline.</li>
+          <li><b class="accent-green">AI as a SOC analyst assistant</b> — Gemini reads the raw alert and produces a plain-English incident report.</li>
+          <li><b class="accent-amber">Human-in-the-loop</b> — I verify accuracy and redact sensitive data before AI analysis or filing.</li>
+          <li><b class="accent-amber">Built as a learning tool</b> — stay involved at each stage to understand how the analyst workflow works.</li>
         </ul>
       </div>
       <div class="panel">
+        <h3>What It Delivers</h3>
         <ul class="bullets">
-          <li>Same logic powers a <b>terminal CLI</b> and a <b>SIEM-style web console</b> — Search, Alerts, Enrichment, Analysis, and Tickets.</li>
-          <li>Click-through <b>OpenSearch Discover</b> links jump directly to the raw document for deeper investigation.</li>
+          <li>One tool ties together <b>five steps</b> that used to live in separate places.</li>
+          <li>Same logic powers a <b>terminal CLI</b> and a <b>SIEM-style web console</b>.</li>
+          <li>Color-coded <b>Suricata severity</b>, network flow, GeoIP, ASN, protocol, and packet/byte counts shown on every alert at a glance.</li>
+          <li>Each alert includes a direct link to the full Suricata log in <b>OpenSearch Discover</b> when you need more detail.</li>
         </ul>
       </div>
     </div>
-    <div class="callout" style="margin-top:1rem;"><b>Human-in-the-loop checkpoint:</b> nothing is sent to AI or filed as a ticket until I review it.</div>
+    <div class="callout" style="margin-top:0.75rem;"><b>Human-in-the-loop checkpoint:</b> nothing is sent to AI or filed as a ticket until I review it.</div>
   </section>
 
-  <!-- SLIDE 5 — UNDER THE HOOD (LOW LEVEL) -->
+  <!-- SLIDE 4 — UNDER THE HOOD (LOW LEVEL) -->
   <section class="slide">
-    <h2><span class="num">04</span>Under the Hood</h2>
+    <h2><span class="num">03</span>Under the Hood</h2>
     <p class="lead" style="margin-bottom:1.4rem;">A look at how each layer of the tool is implemented — from querying the data source to filing the ticket.</p>
     <div class="cols">
       <div class="panel">
-        <h3>// Data &amp; Enrichment</h3>
+        <h3>// Data &amp; Research</h3>
         <ul class="bullets">
           <li>Python queries OpenSearch using <code class="k">Lucene</code> via the Dashboards Dev Tools proxy.</li>
           <li>Public source IPs looked up in <b>AbuseIPDB</b> → confidence/risk score.</li>
-          <li>Each alert surfaces <b>GeoIP, ASN, severity, and traffic-flow context</b> — giving analysts full situational awareness without manual lookup.</li>
+          <li>Each alert shows <b>which Suricata rule fired</b> — the signature name, SID, category, and color-coded severity (1 = highest) — so you know why the log was flagged in the first place.</li>
         </ul>
       </div>
       <div class="panel">
@@ -467,16 +555,16 @@
     </div>
   </section>
 
-  <!-- SLIDE 6 — LIVE DEMO -->
+  <!-- SLIDE 5 — LIVE DEMO -->
   <section class="slide" style="align-items:center; text-align:center;">
-    <h2 style="margin-bottom:1.4rem;"><span class="num">05</span>Live Demo</h2>
+    <h2 style="margin-bottom:1.4rem;"><span class="num">04</span>Live Demo</h2>
     <div class="videowrap" id="videowrap">
       <video controls playsinline preload="metadata" title="SOC Sentinel Live Demo">
         <source src="Final_Project.mp4" type="video/mp4">
         Your browser does not support embedded video.
       </video>
     </div>
-    <p class="lead" style="margin-top:1.4rem; text-align:center;">Watch the full workflow: search&nbsp;→&nbsp;enrich&nbsp;→&nbsp;AI&nbsp;analysis&nbsp;→&nbsp;human&nbsp;review&nbsp;→&nbsp;ticket.</p>
+    <p class="lead" style="margin-top:1.4rem; text-align:center;">Watch the full workflow: search&nbsp;→&nbsp;research&nbsp;→&nbsp;AI&nbsp;analysis&nbsp;→&nbsp;human&nbsp;review&nbsp;→&nbsp;ticket.</p>
     <p style="margin-top:.6rem; text-align:center; font-size:.95rem; opacity:.85;">
       Video not playing?
       <a href="Final_Project.mp4" target="_blank" rel="noopener" style="color:#29e7c8; font-weight:600; text-decoration:none;">Open video file&nbsp;↗</a>
@@ -485,17 +573,17 @@
     </p>
   </section>
 
-  <!-- SLIDE 7 — TAKEAWAYS & COURSES -->
+  <!-- SLIDE 6 — TAKEAWAYS & COURSES -->
   <section class="slide dense">
-    <h2><span class="num">06</span>Takeaways &amp; What Got Me Here</h2>
+    <h2><span class="num">05</span>Takeaways &amp; What Got Me Here</h2>
     <div class="cols">
       <div>
         <div class="kicker" style="margin-bottom:1.4rem;">Key Takeaways</div>
         <ul class="bullets">
-          <li><b>SEC444</b> — Applied automation concepts to streamline alert search, enrichment, and ticket preparation while preserving analyst oversight at each stage.</li>
-          <li><b>SEC450</b> — Drew on vulnerability and countermeasure principles to assess alert severity, enrich source IPs, and determine whether an incident warrants further investigation.</li>
+          <li><b>SEC444</b> — Applied automation concepts to streamline alert search, threat research, and ticket preparation while preserving analyst oversight at each stage.</li>
+          <li><b>SEC450</b> — Drew on vulnerability and countermeasure principles to assess alert severity, research source IPs, and determine whether an incident warrants further investigation.</li>
           <li><b>DEV300</b> — Used structured problem-solving to design a unified processing pipeline accessible through both a CLI and a web-based console.</li>
-          <li><b>IT212–213</b> — Applied networking fundamentals to interpret Suricata alert data, traffic flow, and protocol-level context during triage.</li>
+          <li><b>IT211–213</b> — Applied networking fundamentals to interpret Suricata alert data, traffic flow, and protocol-level context during analysis.</li>
         </ul>
       </div>
       <div>
@@ -514,7 +602,7 @@
             <div class="name">Problem Solving Strategies</div>
           </div>
           <div class="course-card">
-            <div class="code">IT212–213</div>
+            <div class="code">IT211–213</div>
             <div class="name">Networking</div>
           </div>
         </div>
